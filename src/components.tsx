@@ -8,7 +8,7 @@ export function Brand() {
   return (
     <div className="brand">
       <img
-        src="/agronorte-logo.png"
+        src={import.meta.env.BASE_URL + "agronorte-logo.png"}
         alt="Cooperativa Agronorte"
         width="180"
         height="101"
@@ -141,7 +141,7 @@ export function Label({
           <p>
             <span>Parcela / localidad</span>
             <strong>
-              {o.plot?.name} · {o.producer?.community}
+              {o.plot?.name || o.producer?.community || "Pendiente de informar"}
             </strong>
           </p>
           <p>
@@ -177,8 +177,9 @@ export function Label({
         <small>Cooperativa Agronorte · Trazabilidad por pallet</small>
       </div>
       <p className="hint no-print">
-        El QR requiere una URL publicada para consultarlo desde otro celular. La
-        consulta pública muestra código, producto, peso y destino.
+        El QR abre la identificación, peso, destino y estado del pallet. Para
+        consultar productor, lote y origen completo, inicie sesión con una
+        cuenta de la cooperativa.
       </p>
       {error && (
         <p role="alert" className="error">

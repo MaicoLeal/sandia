@@ -23,8 +23,16 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import type { AuditLog, Data, Pallet, Reception, Table } from "./types";
+import type {
+  AuditLog,
+  Data,
+  Pallet,
+  Reception,
+  Table,
+  PalletTrace,
+} from "./types";
 import {
+  intakeSelection,
   assertClassification,
   assertPallet,
   available,
@@ -101,13 +109,7 @@ const number = (form: HTMLFormElement, key: string) => {
 const optionalNumber = (form: HTMLFormElement, key: string) =>
   text(form, key) ? number(form, key) : null;
 function PublicTrace() {
-  const [trace, setTrace] = useState<{
-    code: string;
-    product: string;
-    net_kg: number;
-    destination: string;
-    status: string;
-  } | null>(null);
+  const [trace, setTrace] = useState<PalletTrace | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     const token = new URLSearchParams(location.search).get("trace") ?? "";
@@ -123,6 +125,20 @@ function PublicTrace() {
           net_kg: p.net_kg,
           destination: p.destination,
           status: p.status,
+          weighed_date: p.weighed_date ?? null,
+          origins: local!.data.pallet_items
+            .filter((i) => i.pallet_id === p.id)
+            .map((i) => {
+              const o = origin(local!.data, i.reception_id);
+              return {
+                lot_code: o.lot?.code ?? "",
+                producer: o.producer?.name ?? "",
+                parcel: o.plot?.name ?? null,
+                locality: o.producer?.community ?? "",
+                reception_date: o.reception?.date ?? "",
+                allocated_kg: i.kg,
+              };
+            }),
         };
       return publicTrace(token);
     };
@@ -146,6 +162,45 @@ function PublicTrace() {
           <p>{trace.product}</p>
           <strong className="big-number">{kg(trace.net_kg)} kg</strong>
           <p>Destino: {trace.destination}</p>
+          {trace.weighed_date && (
+            <p>Pesaje del pallet: {dateLabel(trace.weighed_date)}</p>
+          )}
+          {trace.origins.length > 0 ? (
+            <h3>Origen de la sandía</h3>
+          ) : (
+            <p className="hint">
+              Inicie sesión para consultar productor, lote, parcela y fecha de
+              origen.
+            </p>
+          )}
+          {trace.origins.map((o, i) => (
+            <div className="trace-origin" key={i}>
+              <strong>{o.producer}</strong>
+              <p>Lote: {o.lot_code}</p>
+              <p>Parcela: {o.parcel || "Pendiente de informar"}</p>
+              {o.locality && <p>Localidad: {o.locality}</p>}
+              <p>
+                Recepción: {dateLabel(o.reception_date)} · {kg(o.allocated_kg)}{" "}
+                kg
+              </p>
+            </div>
+          ))}
+          <a
+            className="button primary"
+            href={
+              location.pathname +
+              "?pallet=" +
+              encodeURIComponent(
+                new URLSearchParams(location.search).get("trace") ?? "",
+              )
+            }
+          >
+            Consultar detalle con sesión
+          </a>
+          <p className="hint">
+            Documentos, fotos e historial interno requieren una cuenta
+            autorizada.
+          </p>
         </section>
       ) : (
         <p>Consultando etiqueta…</p>
@@ -161,9 +216,20 @@ export default function App() {
   );
 }
 function WorkspaceApp() {
-  const { workspace, error, setError, busy, online, commit, sync, role } =
-    useWorkspace();
-  const [page, setPage] = useState<Page>("Inicio");
+  const {
+    needsLogin,
+    workspace,
+    error,
+    setError,
+    busy,
+    online,
+    commit,
+    sync,
+    role,
+  } = useWorkspace();
+  const [page, setPage] = useState<Page>(
+    new URLSearchParams(location.search).has("pallet") ? "Pallets" : "Inicio",
+  );
   const [dialog, setDialog] = useState<Dialog>(null);
   const [returnToReception, setReturnToReception] = useState(false);
   const [selectedReception, setSelectedReception] = useState<string | null>(
@@ -173,6 +239,9 @@ function WorkspaceApp() {
   const [label, setLabel] = useState<Pallet | null>(null);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
+  const [palletToken, setPalletToken] = useState(() =>
+    new URLSearchParams(location.search).get("pallet"),
+  );
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const close = useCallback(() => {
     setDialog(null);
@@ -183,6 +252,7 @@ function WorkspaceApp() {
     window.addEventListener("app-update", fn);
     return () => window.removeEventListener("app-update", fn);
   }, []);
+  if (needsLogin) return <LoginScreen error={error} onError={setError} />;
   if (!workspace)
     return (
       <div className="loading">
@@ -191,6 +261,9 @@ function WorkspaceApp() {
       </div>
     );
   const data = workspace.data;
+  const visiblePallets = palletToken
+    ? data.pallets.filter((p) => p.token === palletToken)
+    : data.pallets;
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
   const actor = workspace.profile?.name ?? "Operador local";
@@ -648,6 +721,26 @@ function WorkspaceApp() {
               </section>
               <section className="stats">
                 <Stat
+                  label="Total recibido"
+                  value={kg(total)}
+                  unit="kg"
+                  icon={<Scale />}
+                  note="Todas las recepciones activas"
+                />
+                <Stat
+                  label="Productores registrados"
+                  value={String(data.producers.length)}
+                  icon={<Users />}
+                  note={`${data.producers.filter((p) => p.status === "Activo").length} activos`}
+                />
+                <Stat
+                  label="Pérdidas / rechazos"
+                  value={kg(rejects)}
+                  unit="kg"
+                  icon={<ClipboardList />}
+                  note={`${total ? kg(round((rejects / total) * 100)) : "0"}% del peso recibido · selección registrada`}
+                />
+                <Stat
                   label="Recibido hoy"
                   value={kg(totalFor((r) => r.date === today))}
                   unit="kg"
@@ -877,12 +970,31 @@ function WorkspaceApp() {
           {page === "Pallets" && (
             <>
               <div className="toolbar">
-                <p>{data.pallets.length} pallets registrados</p>
+                <p>
+                  {data.pallets.length} pallets registrados ·{" "}
+                  {kg(
+                    data.pallets
+                      .filter((p) => p.status !== "Cancelado")
+                      .reduce((sum, p) => sum + p.net_kg, 0),
+                  )}{" "}
+                  kg netos
+                </p>
                 {newButton("Crear pallet", "pallet", "pallet")}
               </div>
+              {palletToken && (
+                <div className="toolbar">
+                  <p>Consulta del pallet escaneado</p>
+                  <button
+                    className="button secondary"
+                    onClick={() => setPalletToken(null)}
+                  >
+                    Ver todos los pallets
+                  </button>
+                </div>
+              )}
               <div className="card-grid">
-                {data.pallets.length ? (
-                  data.pallets.map((p) => {
+                {visiblePallets.length ? (
+                  visiblePallets.map((p) => {
                     const item = data.pallet_items.find(
                       (i) => i.pallet_id === p.id,
                     );
@@ -897,7 +1009,7 @@ function WorkspaceApp() {
                         </div>
                         <h2>{p.code}</h2>
                         <p>
-                          {o.producer?.name} · {o.plot?.name}
+                          {o.producer?.name} · {o.lot?.code}
                         </p>
                         <strong className="big-number">
                           {kg(p.net_kg)} <small>kg netos</small>
@@ -969,7 +1081,9 @@ function WorkspaceApp() {
                   })
                 ) : (
                   <Empty>
-                    Cree el primer pallet después de clasificar una recepción.
+                    {palletToken
+                      ? "No se encontró este pallet en su organización."
+                      : "Cree el primer pallet después de clasificar una recepción."}
                   </Empty>
                 )}
               </div>
@@ -1296,6 +1410,7 @@ function WorkspaceApp() {
               busy={busy}
               draftKey={draftKey}
               actor={actor}
+              allowSelection={can(role, "classify")}
               onQuickCreate={(type) => {
                 setReturnToReception(true);
                 setDialog(type);
@@ -1304,6 +1419,14 @@ function WorkspaceApp() {
                 await run(async () => {
                   allowed("receive");
                   await commit((d) => {
+                    const selection = values.classifyNow
+                      ? intakeSelection(
+                          summary(values.weights).total,
+                          values.rejectedKg,
+                          values.rejectionReason,
+                        )
+                      : null;
+                    if (selection) allowed("classify");
                     const plot = d.plots.find((p) => p.id === values.plotId);
                     const selected = d.producers.find(
                       (p) =>
@@ -1369,6 +1492,62 @@ function WorkspaceApp() {
                         correction_reason: "",
                       }),
                     );
+                    if (selection) {
+                      const classification = {
+                        ...base(org, "Activo", user),
+                        reception_id: r.id,
+                        approved_kg: selection.approved,
+                        rejected_kg: selection.rejected,
+                        approved_count: null,
+                        rejected_count: null,
+                        reason:
+                          selection.rejected > 0 ? values.rejectionReason : "",
+                        size: "",
+                        quality: null,
+                        notes: "Selección registrada al recibir la carga.",
+                      };
+                      d.classifications.push(classification);
+                      lot.status =
+                        selection.approved === 0
+                          ? "Rechazado"
+                          : selection.rejected > 0
+                            ? "Parcialmente rechazado"
+                            : "En pesaje";
+                      record(
+                        d,
+                        "classifications",
+                        classification.id,
+                        "Clasificación registrada",
+                        null,
+                        classification,
+                      );
+                    }
+                    for (const photo of values.photos ?? []) {
+                      const attachment = {
+                        ...base(org, "Activo", user),
+                        id: photo.id,
+                        entity_type: "receptions" as const,
+                        entity_id: r.id,
+                        name: photo.name,
+                        mime: photo.mime,
+                        size: photo.size,
+                        storage_path:
+                          org +
+                          "/" +
+                          photo.id +
+                          "/" +
+                          photo.name.replace(/[^a-zA-Z0-9._-]/g, "_"),
+                      };
+                      d.attachments.push(attachment);
+                      record(
+                        d,
+                        "attachments",
+                        attachment.id,
+                        "Adjunto agregado",
+                        null,
+                        { name: photo.name },
+                      );
+                    }
                     record(d, "receptions", r.id, "Recepción creada", null, {
                       ...r,
                       total_kg: summary(values.weights).total,
@@ -1633,6 +1812,7 @@ function WorkspaceApp() {
                         token: crypto.randomUUID(),
                         destination: text(form, "destination"),
                         assembled_at: now(),
+                        weighed_date: text(form, "weighed_date") || null,
                         responsible: text(form, "responsible"),
                         gross_kg: gross,
                         net_kg: net,
@@ -1829,6 +2009,17 @@ function WorkspaceApp() {
                 Sin una cuenta, los datos se guardan solo en este dispositivo.
                 Con Supabase se utiliza el perfil asignado en el servidor.
               </p>
+              {can(role, "correct") && (
+                <details>
+                  <summary>Ver respaldo JSON</summary>
+                  <textarea
+                    aria-label="Respaldo JSON"
+                    readOnly
+                    rows={6}
+                    value={JSON.stringify(workspace, null, 2)}
+                  />
+                </details>
+              )}
               <div className="setting-info">
                 <CloudOff />
                 <div>
@@ -2381,6 +2572,12 @@ function Timeline({ log }: { log: AuditLog }) {
     </div>
   );
 }
+interface DraftPhoto {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
 interface ReceptionValues {
   producerId: string;
   plotId: string;
@@ -2391,12 +2588,17 @@ interface ReceptionValues {
   responsible: string;
   notes: string;
   weights: number[];
+  classifyNow: boolean;
+  rejectedKg: string;
+  rejectionReason: string;
+  photos: DraftPhoto[];
 }
 function ReceptionForm({
   data,
   busy,
   draftKey,
   actor,
+  allowSelection,
   onSave,
   onQuickCreate,
 }: {
@@ -2404,6 +2606,7 @@ function ReceptionForm({
   busy: boolean;
   draftKey: string;
   actor: string;
+  allowSelection: boolean;
   onSave: (values: ReceptionValues) => Promise<void>;
   onQuickCreate: (type: "producer" | "plot") => void;
 }) {
@@ -2417,6 +2620,10 @@ function ReceptionForm({
     responsible: actor,
     notes: "",
     weights: [],
+    classifyNow: allowSelection,
+    rejectedKg: "0",
+    rejectionReason: "",
+    photos: [],
   });
   const [weight, setWeight] = useState("");
   const [error, setError] = useState("");
@@ -2471,7 +2678,13 @@ function ReceptionForm({
       setError("Agregue al menos un pesaje.");
       return;
     }
-    void onSave(values);
+    try {
+      if (values.classifyNow)
+        intakeSelection(s.total, values.rejectedKg, values.rejectionReason);
+      void onSave(values);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
   return (
     <form onSubmit={submit}>
@@ -2663,6 +2876,119 @@ function ReceptionForm({
           Mín. {kg(s.min)} kg · Máx. {kg(s.max)} kg
         </p>
       </div>
+      {allowSelection && (
+        <section className="intake-selection">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={values.classifyNow}
+              onChange={(e) => set("classifyNow", e.target.checked)}
+            />
+            Registrar selección / pérdidas ahora
+          </label>
+          {values.classifyNow ? (
+            <>
+              <Field label="Pérdidas / rechazado (kg)">
+                <input
+                  inputMode="decimal"
+                  value={values.rejectedKg}
+                  onChange={(e) => set("rejectedKg", e.target.value)}
+                />
+              </Field>
+              {Number(values.rejectedKg.replace(",", ".")) > 0 && (
+                <Field label="Motivo de las pérdidas *">
+                  <select
+                    required
+                    value={values.rejectionReason}
+                    onChange={(e) => set("rejectionReason", e.target.value)}
+                  >
+                    <option value="">Seleccione el motivo</option>
+                    {reasons.map((reason) => (
+                      <option key={reason}>{reason}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <p className="hint">
+                Aprobado:{" "}
+                {kg(
+                  Math.max(
+                    0,
+                    round(
+                      s.total -
+                        (Number(values.rejectedKg.replace(",", ".")) || 0),
+                    ),
+                  ),
+                )}{" "}
+                kg · El total recibido incluye lo rechazado.
+              </p>
+            </>
+          ) : (
+            <p className="hint">
+              Puede continuar el pesaje y clasificar después.
+            </p>
+          )}
+        </section>
+      )}
+      <section className="intake-photos">
+        <label className="button secondary full">
+          Foto de la carga / pérdida (opcional)
+          <input
+            className="sr-only"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            disabled={busy || !ready}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              void (async () => {
+                try {
+                  if (
+                    !["image/jpeg", "image/png", "image/webp"].includes(
+                      file.type,
+                    ) ||
+                    !file.size ||
+                    file.size > 10 * 1024 * 1024
+                  )
+                    throw new Error("Use JPG, PNG o WEBP de hasta 10 MB.");
+                  const photo = {
+                    id: crypto.randomUUID(),
+                    name: file.name,
+                    mime: file.type,
+                    size: file.size,
+                  };
+                  await saveFile(photo.id, file);
+                  setValues((v) => ({
+                    ...v,
+                    photos: [...(v.photos ?? []), photo],
+                  }));
+                } catch (e) {
+                  setError((e as Error).message);
+                }
+              })();
+            }}
+          />
+        </label>
+        {values.photos?.map((photo) => (
+          <div className="draft-photo" key={photo.id}>
+            <DraftPhotoPreview photo={photo} />
+            <button
+              className="link"
+              type="button"
+              onClick={() =>
+                set(
+                  "photos",
+                  values.photos.filter((p) => p.id !== photo.id),
+                )
+              }
+            >
+              Quitar foto del borrador
+            </button>
+          </div>
+        ))}
+      </section>
       <Field label="Observaciones">
         <textarea
           value={values.notes}
@@ -2743,6 +3069,9 @@ function PalletForm({
           <input name="gross" inputMode="decimal" />
         </Field>
       </div>
+      <Field label="Fecha de pesaje del pallet (si se conoce)">
+        <input type="date" name="weighed_date" />
+      </Field>
       <Field label="Cantidad de frutas por pallet">
         <input name="fruits" type="number" min="0" step="1" />
       </Field>
@@ -2985,5 +3314,94 @@ function Reports({
         como PDF” en el diálogo de impresión.
       </p>
     </section>
+  );
+}
+
+function DraftPhotoPreview({ photo }: { photo: DraftPhoto }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    void getFile(photo.id).then((file) => {
+      if (!file || !active) return;
+      objectUrl = URL.createObjectURL(file);
+      setUrl(objectUrl);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [photo.id]);
+  return (
+    <>
+      {url && <img src={url} alt={photo.name} width={96} height={96} />}
+      <span>{photo.name}</span>
+    </>
+  );
+}
+
+function LoginScreen({
+  error,
+  onError,
+}: {
+  error: string;
+  onError: (message: string) => void;
+}) {
+  const [sending, setSending] = useState(false);
+  return (
+    <main className="login-screen">
+      <Brand />
+      <section className="panel">
+        <h1>Recepción de Sandía</h1>
+        <p>Inicie sesión para registrar y consultar datos de la cooperativa.</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            setSending(true);
+            onError("");
+            void (async () => {
+              try {
+                if (!supabase)
+                  throw new Error("Conexión pendiente de configurar.");
+                const result = await supabase.auth.signInWithPassword({
+                  email: text(form, "email"),
+                  password: text(form, "password"),
+                });
+                if (result.error) throw result.error;
+              } catch (e) {
+                onError((e as Error).message);
+              } finally {
+                setSending(false);
+              }
+            })();
+          }}
+        >
+          <Field label="Correo electrónico">
+            <input name="email" type="email" required autoComplete="username" />
+          </Field>
+          <Field label="Contraseña">
+            <input
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+            />
+          </Field>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <Submit disabled={sending}>
+            {sending ? "Ingresando…" : "Iniciar sesión"}
+          </Submit>
+        </form>
+        <p className="hint">
+          Su administrador asigna el perfil de acceso. El QR del pallet permite
+          consultar su identificación sin iniciar sesión.
+        </p>
+      </section>
+    </main>
   );
 }

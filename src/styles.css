@@ -1633,3 +1633,51 @@ th {
     margin: 10px auto;
   }
 }
+
+.intake-selection,
+.intake-photos {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--border, #dce5d8);
+  border-radius: 16px;
+  background: #f5f8f1;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.check-row input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+.draft-photo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.draft-photo img {
+  object-fit: cover;
+  border-radius: 10px;
+}
+.trace-origin {
+  padding: 14px 0;
+  border-top: 1px solid #dce5d8;
+}
+
+.login-screen {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 48px 20px;
+  min-height: 100dvh;
+}
+.login-screen .panel {
+  padding: 24px;
+  margin-top: 24px;
+}

@@ -4,7 +4,7 @@ Aplicação React + TypeScript + Vite + Tailwind, em espanhol do Paraguai. Inter
 
 ## Executar
 
-Requisitos: Node.js 22.12 ou superior e npm. Dependências fixadas em `pnpm-lock.yaml`; também pode usar `pnpm install --frozen-lockfile`.
+Requisitos: Node.js 22.12 ou superior e npm. Use `npm ci` com `package-lock.json`; também pode usar `pnpm install --frozen-lockfile`.
 
 ```sh
 npm install
@@ -35,7 +35,7 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 1. Aplique as migrações de `supabase/migrations/` em ordem de nome, em um projeto novo, pelo SQL Editor ou pelo fluxo de migrações Supabase.
 2. Crie o usuário em Authentication > Users, com senha definida pelo próprio usuário. A conta do painel Supabase é diferente de um usuário Auth do aplicativo.
 3. Aplique o bootstrap de organização/perfil após substituir o UUID do usuário em `supabase/bootstrap.example.sql`. A primeira conta precisa de perfil administrador. Perfis seguintes são atribuídos por SQL administrativo nesta primeira versão.
-4. No aplicativo, abra Configuración e inicie sessão. O espaço autenticado começa vazio: os exemplos locais nunca são enviados ao banco de produção.
+4. No aplicativo, inicie sessão. O espaço autenticado carrega os registros da organização; exemplos de teste nunca são enviados ao banco de produção.
 5. Depois de publicar, configure `VITE_PUBLIC_TRACE_URL` com a URL HTTPS real e gere as etiquetas. QR com localhost não funciona em outro celular.
 
 ## Fluxo de uso
@@ -43,7 +43,7 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 - Cadastre produtor e propriedade/parcela, ou use os atalhos dentro da recepção.
 - Nueva recepción: escolha produtor e a parcela, quando conhecida, crie ou selecione lote, informe datas/responsável e adicione pesos. O resumo calcula total, contagem, média, mínimo e máximo.
 - Parcela, data de colheita, peso bruto e nota de qualidade visual podem ficar sem informação; o sistema não atribui valores fictícios.
-- A seleção divide o recebido em aprovado/rejeitado, ambos em kg. Quantidade de frutas é opcional e não interfere no saldo em kg.
+- Na própria recepção, marque seleção e informe perdas em kg e motivo; a soma aprovada é calculada automaticamente. Desmarque essa opção quando ainda estiver pesando, para classificar depois. Fotos da carga/perda são opcionais e ficam no rascunho antes da confirmação. Quantidade de frutas é opcional e não interfere no saldo em kg.
 - Crie um ou vários pallets iguais por operação, informando o peso líquido; bruto/tara podem ficar pendentes. O sistema verifica o saldo aprovado antes de alocar.
 - Consulte/imprima a etiqueta e marque o pallet listo para carga.
 - No modo conectado, sincronize os pallets antes de expedir. A expedição exige destino comum e pallets disponíveis; a transação no servidor impede dupla alocação e dupla expedição.
@@ -54,6 +54,12 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 O aplicativo abre vazio, sem dados fictícios. Ao atualizar uma instalação anterior, remove somente o antigo espaço `demo`, seus rascunhos e anexos locais. Espaços autenticados e o novo espaço local de dados reais são preservados. Exemplos continuam apenas nas fixtures dos testes e não são carregados pelo aplicativo.
 
 Sem login, os registros reais permanecem exclusivamente neste navegador/dispositivo, com aviso explícito. Baixe um respaldo local antes de limpar dados do navegador. Iniciar sessão abre um espaço separado da organização: esta versão não transfere automaticamente os registros locais para a conta. Essa transferência precisa de procedimento supervisionado, para evitar duplicação e perda de origem.
+
+Os registros reais iniciais foram transferidos de forma supervisionada para o Supabase, preservando UUIDs, tokens QR e auditoria. As quantidades e datas foram conferidas no banco. Campos ainda não confirmados permanecem pendentes. Esses dados não são sementes da aplicação nem fazem parte do repositório; respaldos e scripts de transferência ficam em diretórios locais ignorados pelo Git.
+
+## Publicação
+
+O workflow `.github/workflows/pages.yml` valida lint, testes e build antes de publicar em `https://maicoleal.github.io/sandia/`. Configure as variáveis do repositório `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` com a configuração pública do projeto e habilite GitHub Pages em modo GitHub Actions. A publicação usa `/sandia/`, URL HTTPS para QR e `VITE_REQUIRE_AUTH=true`: o operador precisa entrar na conta para acessar a operação real. O modo local sem login fica disponível apenas na configuração de desenvolvimento, com `VITE_REQUIRE_AUTH=false`.
 
 ## Persistência e offline
 
@@ -69,7 +75,7 @@ As tabelas utilizam UUID e organização; FKs compostas impedem ligar entidades 
 
 O banco preserva o código/nome de lote informado (único por organização) e gera um código quando ele está vazio. Gera os códigos finais dos pallets, datas e auditoria. O operador vê um código provisório local até a sincronização. Auditoria preserva antes/depois e usuário. Correções de peso exigem gestor/administrador e motivo; uma recepção já classificada exige reversão supervisionada, ainda não disponível na interface. Correção de data antes da classificação exige justificativa e gera auditoria. Cancelamento de recepção antes da classificação preserva as pesagens e registra justificativa. Pallets expedidos e vínculos operacionais não podem ser editados diretamente.
 
-Anexos são privados (máximo 10 MB), com leitura autenticada e URLs assinadas. O QR usa token opaco e mostra somente código, produto, peso líquido, destino e status. A solicitação de impressão é auditada; o navegador não confirma que a impressora fisicamente imprimiu.
+Anexos são privados (máximo 10 MB), com leitura autenticada e URLs assinadas. O QR usa token opaco e mostra publicamente somente código, produto, peso líquido, destino e status. Uma sessão da mesma organização permite consultar também produtor, lote, parcela/localidade, data de recepção, data de pesagem e peso alocado, pela RPC privada. O botão de detalhe abre diretamente o pallet escaneado. A solicitação de impressão é auditada; o navegador não confirma que a impressora fisicamente imprimiu.
 
 As políticas seguem a [documentação de RLS do Supabase](https://supabase.com/docs/guides/database/postgres/row-level-security). Os testes PostgreSQL locais simulam Auth/Storage para validar SQL e regras; não substituem a homologação de Auth e Storage no projeto real.
 

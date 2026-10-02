@@ -71,6 +71,7 @@ export interface Pallet extends Base {
   token: string;
   destination: string;
   assembled_at: string;
+  weighed_date?: string | null;
   responsible: string;
   gross_kg: number | null;
   net_kg: number;
@@ -143,4 +144,21 @@ export interface Workspace {
   localOnly: boolean;
   organizationId: string;
   profile: Profile | null;
+}
+
+export interface PalletTrace {
+  weighed_date?: string | null;
+  code: string;
+  product: string;
+  net_kg: number;
+  destination: string;
+  status: string;
+  origins: {
+    lot_code: string;
+    producer: string;
+    parcel: string | null;
+    locality: string;
+    reception_date: string;
+    allocated_kg: number;
+  }[];
 }

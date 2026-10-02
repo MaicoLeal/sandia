@@ -147,7 +147,7 @@ export function can(
       catalog: role === "recepcion",
       receive: role === "recepcion",
       weigh: role === "pesaje" || role === "recepcion",
-      classify: role === "packing",
+      classify: role === "packing" || role === "recepcion",
       pallet: role === "packing",
       ship: role === "packing",
       correct: false,
@@ -169,5 +169,23 @@ export function emptyData(): Data {
     shipment_pallets: [],
     attachments: [],
     audit_logs: [],
+  };
+}
+
+export function intakeSelection(
+  total: number,
+  rejectedInput: string,
+  reason: string,
+) {
+  const rejected = rejectedInput.trim()
+    ? Number(rejectedInput.trim().replace(",", "."))
+    : 0;
+  if (!Number.isFinite(rejected) || rejected < 0 || round(rejected) > total)
+    throw new Error("Las pérdidas deben estar entre cero y el peso recibido.");
+  if (round(rejected) > 0 && !reason.trim())
+    throw new Error("Seleccione el motivo de las pérdidas.");
+  return {
+    approved: round(total - round(rejected)),
+    rejected: round(rejected),
   };
 }

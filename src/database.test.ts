@@ -48,6 +48,15 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610020005_operational_intake_trace.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await db.query(`insert into auth.users values($1);`, [user]);
   await db.query(
     `insert into organizations(id,name) values($1,'Test Agronorte');`,
@@ -189,8 +198,22 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
       quality: null,
       notes: "",
     });
+    await db.exec("reset role");
+    await db.query("update profiles set role='recepcion' where user_id=$1", [
+      user,
+    ]);
+    await db.exec("set role authenticated");
+    const missingReason = structuredClone(next);
+    missingReason.classifications[0].reason = "";
+    await expect(sync(missingReason, 2)).rejects.toThrow("motivo");
     await sync(next, 2);
     snapshot = await remote();
+    await db.exec("reset role");
+    await db.query(
+      "update profiles set role='administrador' where user_id=$1",
+      [user],
+    );
+    await db.exec("set role authenticated");
     const bad = structuredClone(snapshot);
     const p = {
       ...base(org, "En armado"),
@@ -233,7 +256,28 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
       "product",
       "status",
     ]);
+    await expect(
+      db.query("select public.private_pallet_trace($1)", [
+        snapshot.pallets[0].token,
+      ]),
+    ).rejects.toThrow("permission denied");
     await db.exec("set role authenticated");
+    const privateResult = await db.query<{
+      trace: {
+        origins: { lot_code: string; producer: string; allocated_kg: number }[];
+      };
+    }>("select public.private_pallet_trace($1) as trace", [
+      snapshot.pallets[0].token,
+    ]);
+    expect(privateResult.rows[0].trace.origins[0].lot_code).toBe("01102026");
+    expect(privateResult.rows[0].trace.origins[0].producer).toBe(
+      "Elias Galeano",
+    );
+    expect(privateResult.rows[0].trace.origins[0].allocated_kg).toBe(3000);
+    expect(JSON.stringify(privateResult.rows[0].trace)).not.toContain("phone");
+    expect(JSON.stringify(privateResult.rows[0].trace)).not.toContain(
+      "document",
+    );
   });
   it("aísla otra organización por RLS", async () => {
     await db.exec("reset role");

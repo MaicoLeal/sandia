@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import type { Data, Profile, Workspace } from "../types";
+import type { Data, Profile, Workspace, PalletTrace } from "../types";
 import { getFile } from "./storage";
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -104,15 +104,17 @@ export async function publicTrace(token: string) {
     throw new Error(
       "Consulta pública disponible cuando Supabase esté configurado.",
     );
+  const session = await supabase.auth.getSession();
+  if (session.data.session) {
+    const privateResult = await supabase.rpc("private_pallet_trace", {
+      trace_token: token,
+    });
+    if (privateResult.error) throw privateResult.error;
+    if (privateResult.data) return privateResult.data as PalletTrace;
+  }
   const { data, error } = await supabase.rpc("public_pallet_trace", {
     trace_token: token,
   });
   if (error) throw error;
-  return data as {
-    code: string;
-    product: string;
-    net_kg: number;
-    destination: string;
-    status: string;
-  } | null;
+  return data ? ({ ...data, origins: [] } as PalletTrace) : null;
 }

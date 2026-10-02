@@ -10,6 +10,7 @@ import { loadRemote, supabase, syncRemote } from "./services/supabase";
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const lock = useRef(false);
@@ -18,6 +19,7 @@ export function useWorkspace() {
       await removeLegacyDemo();
       const session = supabase ? await supabase.auth.getSession() : null;
       if (session?.data.session) {
+        setNeedsLogin(false);
         const key = "cloud:" + session.data.session.user.id;
         const cached = await readWorkspace(key);
         if (cached) {
@@ -33,6 +35,12 @@ export function useWorkspace() {
         await saveWorkspace(key, remote);
         setWorkspace(remote);
       } else {
+        if (import.meta.env.VITE_REQUIRE_AUTH === "true") {
+          setWorkspace(null);
+          setNeedsLogin(true);
+          return;
+        }
+        setNeedsLogin(false);
         const cached = await readWorkspace(LOCAL_KEY);
         const initial = cached ?? {
           data: emptyData(),
@@ -135,6 +143,7 @@ export function useWorkspace() {
     return () => clearTimeout(timer);
   }, [workspace, online, sync]);
   return {
+    needsLogin,
     workspace,
     error,
     setError,

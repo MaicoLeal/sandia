@@ -1,6 +1,7 @@
 import { seed } from "./test-fixtures";
 import { describe, it, expect } from "vitest";
 import {
+  intakeSelection,
   assertClassification,
   assertPallet,
   available,
@@ -31,6 +32,19 @@ describe("recepción y trazabilidad", () => {
     });
     expect(receptionTotal(d, d.receptions[0].id)).toBe(3247);
     expect(origin(d, d.receptions[0].id).producer?.name).toBe("Elias Galeano");
+  });
+  it("registra pérdidas sin exceder el recibido y exige motivo", () => {
+    expect(intakeSelection(3297, "0", "")).toEqual({
+      approved: 3297,
+      rejected: 0,
+    });
+    expect(intakeSelection(100, "12,5", "Fruta dañada")).toEqual({
+      approved: 87.5,
+      rejected: 12.5,
+    });
+    expect(() => intakeSelection(100, "101", "Otro")).toThrow();
+    expect(() => intakeSelection(100, "12", "")).toThrow("motivo");
+    expect(() => intakeSelection(100, "-1", "Otro")).toThrow();
   });
   it("acepta coma decimal y evita entradas ambiguas", () => {
     expect(parseKg("340,25")).toBe(340.25);
