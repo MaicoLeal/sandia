@@ -1,4 +1,15 @@
 import type { Base, Data, Role, Pallet } from "./types";
+export const lossReasons = [
+  "Fruta dañada",
+  "Tamaño fuera del estándar",
+  "Maduración inadecuada",
+  "Problema visual",
+  "Rajadura",
+  "Podredumbre",
+  "Posible daño de plaga",
+  "Otro",
+];
+
 export const LOCAL_ORG = "20000000-0000-4000-8000-000000000001";
 export const LOCAL_KEY = "local:agronorte";
 export const now = () => new Date().toISOString();
@@ -166,6 +177,88 @@ export function assertClassification(
     .reduce((a, b) => a + b.kg, 0);
   if (approved < allocated)
     throw new Error("El peso aprobado no puede ser menor al ya palletizado.");
+}
+export function regionalLosses(
+  data: Data,
+  from = "",
+  to = "",
+  producerId = "",
+) {
+  const groups = new Map<
+    string,
+    {
+      region: string;
+      received: number;
+      assessed: number;
+      rejected: number;
+      receptions: number;
+      classified: number;
+      producers: Set<string>;
+      observations: number;
+    }
+  >();
+  for (const reception of data.receptions) {
+    if (
+      reception.status === "Cancelado" ||
+      (from && reception.date < from) ||
+      (to && reception.date > to)
+    )
+      continue;
+    const source = origin(data, reception.id);
+    if (producerId && source.producer?.id !== producerId) continue;
+    const classification = data.classifications.find(
+      (c) => c.reception_id === reception.id && c.status !== "Cancelado",
+    );
+    const region =
+      classification?.region?.trim() ||
+      source.plot?.location?.trim() ||
+      source.producer?.community?.trim() ||
+      "Región sin informar";
+    const key = region
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("es")
+      .replace(/\s+/g, " ");
+    const group = groups.get(key) ?? {
+      region,
+      received: 0,
+      assessed: 0,
+      rejected: 0,
+      receptions: 0,
+      classified: 0,
+      producers: new Set<string>(),
+      observations: 0,
+    };
+    const total = receptionTotal(data, reception.id);
+    group.received = round(group.received + total);
+    group.receptions++;
+    if (source.producer) group.producers.add(source.producer.id);
+    if (classification) {
+      group.assessed = round(group.assessed + total);
+      group.rejected = round(group.rejected + classification.rejected_kg);
+      group.classified++;
+      if (
+        classification.pest_observation?.trim() ||
+        classification.symptoms?.trim()
+      )
+        group.observations++;
+    }
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      producers: group.producers.size,
+      rate:
+        group.assessed > 0
+          ? round((group.rejected / group.assessed) * 100)
+          : null,
+    }))
+    .sort(
+      (a, b) =>
+        (b.rate ?? -1) - (a.rate ?? -1) ||
+        a.region.localeCompare(b.region, "es"),
+    );
 }
 export function assertPallet(
   data: Data,

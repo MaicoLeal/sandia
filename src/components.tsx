@@ -1,5 +1,5 @@
 import { cloneElement, useEffect, useId, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode, ComponentProps } from "react";
 import { X, Printer, Download, CheckCircle2, Leaf } from "lucide-react";
 import QRCode from "qrcode";
 import type { Data, Pallet } from "./types";
@@ -18,6 +18,21 @@ export function Brand() {
 }
 export function Badge({ children }: { children: ReactNode }) {
   return <span className="badge">{children}</span>;
+}
+export function NumericInput(props: ComponentProps<"input">) {
+  return (
+    <input
+      {...props}
+      type={props.type ?? "text"}
+      inputMode={props.inputMode ?? "decimal"}
+      autoComplete="off"
+      enterKeyHint={props.enterKeyHint ?? "done"}
+      onFocus={(event) => {
+        event.currentTarget.select();
+        props.onFocus?.(event);
+      }}
+    />
+  );
 }
 export function Empty({ children }: { children: ReactNode }) {
   return (

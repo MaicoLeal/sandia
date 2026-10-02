@@ -56,6 +56,9 @@ export interface Weight extends Base {
   correction_reason: string;
 }
 export interface Classification extends Base {
+  region?: string | null;
+  pest_observation?: string | null;
+  symptoms?: string | null;
   reception_id: string;
   approved_kg: number;
   rejected_kg: number;

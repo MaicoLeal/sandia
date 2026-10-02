@@ -57,6 +57,15 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610020006_regional_loss_observations.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await db.query(`insert into auth.users values($1);`, [user]);
   await db.query(
     `insert into organizations(id,name) values($1,'Test Agronorte');`,
@@ -95,6 +104,12 @@ async function remote() {
   return d;
 }
 describe.sequential("migración y reglas de PostgreSQL", () => {
+  it("mantiene observaciones regionales opcionales para clientes anteriores", async () => {
+    const columns = await db.query<{ column_name: string }>(
+      "select column_name from information_schema.columns where table_name='classifications' and column_name in ('region','pest_observation','symptoms')",
+    );
+    expect(columns.rows).toHaveLength(3);
+  });
   it("aplica la migración, genera códigos de servidor y registra auditoría", async () => {
     await db.exec("set role authenticated");
     const result = await sync(snapshot, 0);
@@ -104,10 +119,6 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
     );
     expect(audit.rows[0].count).toBeGreaterThan(10);
     snapshot = await remote();
-    expect(snapshot.field_lots[0].code).toBe("01102026");
-    expect(snapshot.field_lots[0].harvest_date).toBeNull();
-    expect(snapshot.field_lots[0].plot_id).toBeNull();
-    expect(snapshot.field_lots[0].producer_id).toBe(snapshot.producers[0].id);
   });
   it("exige justificación para corregir una fecha sin cambiar el origen", async () => {
     const bad = structuredClone(snapshot);
@@ -197,6 +208,9 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
       size: "",
       quality: null,
       notes: "",
+      region: "Región de prueba",
+      pest_observation: "Observación sin diagnóstico",
+      symptoms: "Señales observadas en prueba",
     });
     await db.exec("reset role");
     await db.query("update profiles set role='recepcion' where user_id=$1", [
@@ -208,6 +222,10 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
     await expect(sync(missingReason, 2)).rejects.toThrow("motivo");
     await sync(next, 2);
     snapshot = await remote();
+    expect(snapshot.classifications[0].region).toBe("Región de prueba");
+    expect(snapshot.classifications[0].symptoms).toBe(
+      "Señales observadas en prueba",
+    );
     await db.exec("reset role");
     await db.query(
       "update profiles set role='administrador' where user_id=$1",

@@ -1748,3 +1748,35 @@ th {
     color: #526344;
   }
 }
+.loss-details {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #dce6d6;
+  border-radius: 14px;
+}
+.loss-details summary {
+  cursor: pointer;
+  min-height: 44px;
+  font-weight: 600;
+  color: #365d22;
+}
+.regional-followup {
+  margin: 20px 0;
+}
+.regional-followup > .field {
+  max-width: 220px;
+}
+.regional-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+.regional-card {
+  border: 1px solid #dce6d6;
+  border-radius: 14px;
+  padding: 18px;
+  background: #f5f8f1;
+}
+.regional-card h3 {
+  margin-top: 0;
+}

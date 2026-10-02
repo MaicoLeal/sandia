@@ -3,6 +3,7 @@ import type { Data, Pallet } from "./types";
 import { describe, it, expect } from "vitest";
 import {
   intakeSelection,
+  regionalLosses,
   groupPalletsByProducer,
   assertClassification,
   assertPallet,
@@ -17,6 +18,66 @@ import {
   summary,
 } from "./domain";
 describe("recepción y trazabilidad", () => {
+  it("calcula pérdidas regionales sobre entregas seleccionadas y excluye canceladas", () => {
+    const d = seed();
+    const r = d.receptions[0];
+    const total = receptionTotal(d, r.id);
+    d.classifications = [
+      {
+        ...base(r.organization_id),
+        reception_id: r.id,
+        approved_kg: total - 100,
+        rejected_kg: 100,
+        approved_count: null,
+        rejected_count: null,
+        reason: "Daño",
+        size: "",
+        quality: null,
+        notes: "",
+        region: "Caaguazú",
+        pest_observation: "Por revisar",
+      },
+    ];
+    const pending = { ...r, ...base(r.organization_id), date: "2026-10-02" };
+    d.receptions.push(pending);
+    d.reception_weights.push({
+      ...d.reception_weights[0],
+      ...base(r.organization_id),
+      reception_id: pending.id,
+      kg: 1000,
+    });
+    const second = { ...pending, ...base(r.organization_id) };
+    d.receptions.push(second);
+    d.reception_weights.push({
+      ...d.reception_weights[0],
+      ...base(r.organization_id),
+      reception_id: second.id,
+      kg: 200,
+    });
+    d.classifications.push({
+      ...d.classifications[0],
+      ...base(r.organization_id),
+      reception_id: second.id,
+      approved_kg: 100,
+      rejected_kg: 100,
+      region: "caaguazu",
+      pest_observation: "",
+    });
+    const grouped = regionalLosses(d);
+    const assessed = grouped.find((g) => g.region === "Caaguazú")!;
+    expect(assessed.assessed).toBe(total + 200);
+    expect(assessed.rejected).toBe(200);
+    expect(assessed.rate).toBe(Math.round((200 / (total + 200)) * 10000) / 100);
+    expect(assessed.classified).toBe(2);
+    expect(assessed.observations).toBe(1);
+    expect(grouped.find((g) => g.classified === 0)?.rate).toBeNull();
+    second.status = "Cancelado";
+    expect(
+      regionalLosses(d).find((g) => g.region === "Caaguazú")?.rejected,
+    ).toBe(100);
+    expect(regionalLosses(d, "2026-11-01")).toHaveLength(0);
+    expect(regionalLosses(d, "", "", "other-producer")).toHaveLength(0);
+  });
   it("agrupa pallets por todas sus procedencias sin duplicar peso", () => {
     const d: Data = seed();
     const org = d.producers[0].organization_id;

@@ -98,3 +98,12 @@ Logotipo `PRINCIPAL.png` confirmado no Drive oficial, preservado em `public/agro
 ## Arquivos principais
 
 `src/App.tsx`: telas e formulários. `src/domain.ts`: cálculos e regras. `src/types.ts`: tipos relacionais. `src/useWorkspace.ts`: persistência e sincronização. `src/services/supabase.ts`: Auth, tabelas, Storage e RPC. `src/services/reports.ts`: exportação e impressão. `supabase/migrations/`: esquema e regras do servidor.
+
+### Entrada mobile e acompanhamento de perdas
+
+- Pesos, perdas e área usam teclado decimal (`inputMode=decimal`), aceitam vírgula ou ponto e selecionam o valor ao tocar. Quantidades inteiras usam teclado numérico. Ao adicionar um peso, o foco retorna ao campo para o próximo valor.
+- Em **Productores → histórico**, há acesso a **Nueva recepción de este productor** e **Registrar pérdidas / selección**. A seleção registra a perda em kg, motivo e aprovação automática; uma recepção já classificada preserva seu histórico e não recebe uma classificação duplicada.
+- Na recepção e na seleção posterior, **Región y observaciones de campo** permite comunidade, possível praga e sinais observados. Fotos ficam vinculadas à recepção; na entrada rápida elas também são mantidas no rascunho local.
+- **Informes → Pérdidas por región** reúne peso recebido, peso avaliado, perdas, índice, produtores e cobertura da seleção por período. O denominador do índice inclui apenas recepções selecionadas. Registros cancelados são excluídos.
+- A referência de revisão começa em 5% e pode ser ajustada no relatório. Não é um limiar agronômico validado. A indicação discreta **Revisar registros** exige região informada e ao menos duas entregas selecionadas; não diagnostica pragas e não gera aviso no dashboard.
+- A migração `202610020006_regional_loss_observations.sql` adiciona três campos opcionais a `classifications`, preservando compatibilidade com clientes anteriores, auditoria, imutabilidade da seleção e proteção por organização.

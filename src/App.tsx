@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowDownToLine,
@@ -33,6 +33,8 @@ import type {
 } from "./types";
 import {
   intakeSelection,
+  regionalLosses,
+  lossReasons,
   groupPalletsByProducer,
   assertClassification,
   assertPallet,
@@ -51,8 +53,18 @@ import {
   round,
   summary,
 } from "./domain";
+import { LossFields } from "./LossFields";
 import { useWorkspace } from "./useWorkspace";
-import { Badge, Brand, Empty, Field, Label, Modal, Submit } from "./components";
+import {
+  Badge,
+  Brand,
+  Empty,
+  Field,
+  Label,
+  Modal,
+  Submit,
+  NumericInput,
+} from "./components";
 import {
   clearDraft,
   getFile,
@@ -89,15 +101,7 @@ const nav = [
   { name: "Expedición", icon: Truck },
   { name: "Informes", icon: FileText },
 ] as const;
-const reasons = [
-  "Fruta dañada",
-  "Tamaño fuera del estándar",
-  "Maduración inadecuada",
-  "Problema visual",
-  "Rajadura",
-  "Podredumbre",
-  "Otro",
-];
+const reasons = lossReasons;
 const text = (form: HTMLFormElement, key: string) =>
   String(new FormData(form).get(key) ?? "").trim();
 const number = (form: HTMLFormElement, key: string) => {
@@ -1306,7 +1310,7 @@ function WorkspaceApp() {
               plot: "Nueva propiedad y parcela",
               reception: "Nueva recepción",
               weight: "Registrar pesaje",
-              classification: "Clasificación / selección",
+              classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
               shipment: "Nueva expedición",
               settings: "Configuración",
@@ -1483,7 +1487,7 @@ function WorkspaceApp() {
               </Field>
               <div className="form-grid">
                 <Field label="Área aproximada (ha)">
-                  <input name="area" inputMode="decimal" />
+                  <NumericInput name="area" inputMode="decimal" />
                 </Field>
                 <Field label="Variedad">
                   <input name="variety" />
@@ -1505,7 +1509,10 @@ function WorkspaceApp() {
             <ReceptionForm
               data={data}
               busy={busy}
-              draftKey={draftKey}
+              draftKey={
+                draftKey + (selectedProducer ? ":" + selectedProducer : "")
+              }
+              initialProducerId={selectedProducer ?? ""}
               actor={actor}
               allowSelection={can(role, "classify")}
               onQuickCreate={(type) => {
@@ -1602,6 +1609,13 @@ function WorkspaceApp() {
                         size: "",
                         quality: null,
                         notes: "Selección registrada al recibir la carga.",
+                        region:
+                          values.region ||
+                          selected.community ||
+                          plot?.location ||
+                          "",
+                        pest_observation: values.pestObservation,
+                        symptoms: values.symptoms,
                       };
                       d.classifications.push(classification);
                       lot.status =
@@ -1650,7 +1664,9 @@ function WorkspaceApp() {
                       total_kg: summary(values.weights).total,
                     });
                   });
-                  await clearDraft(draftKey);
+                  await clearDraft(
+                    draftKey + (selectedProducer ? ":" + selectedProducer : ""),
+                  );
                 });
               }}
             />
@@ -1726,7 +1742,7 @@ function WorkspaceApp() {
                 </select>
               </Field>
               <Field label="Peso (kg) *">
-                <input
+                <NumericInput
                   name="kg"
                   inputMode="decimal"
                   required
@@ -1777,6 +1793,9 @@ function WorkspaceApp() {
                       size: text(form, "size"),
                       quality: optionalNumber(form, "quality"),
                       notes: text(form, "notes"),
+                      region: text(form, "region"),
+                      pest_observation: text(form, "pest_observation"),
+                      symptoms: text(form, "symptoms"),
                     };
                     d.classifications.push(c);
                     const lot = d.field_lots.find(
@@ -1802,82 +1821,28 @@ function WorkspaceApp() {
                 });
               }}
             >
-              <Field label="Recepción *">
-                <select
-                  name="reception"
-                  required
-                  defaultValue={selectedReception ?? ""}
-                >
-                  <option value="">Seleccione</option>
-                  {data.receptions
-                    .filter(
-                      (r) =>
-                        !data.classifications.some(
-                          (c) =>
-                            c.reception_id === r.id && c.status !== "Cancelado",
-                        ),
-                    )
-                    .map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {origin(data, r.id).lot?.code} ·{" "}
-                        {kg(receptionTotal(data, r.id))} kg
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <div className="form-grid">
-                <Field label="Aprobado (kg) *">
-                  <input
-                    name="approved"
-                    required
-                    inputMode="decimal"
-                    defaultValue={
-                      selectedReception
-                        ? receptionTotal(data, selectedReception)
-                        : ""
-                    }
-                  />
-                </Field>
-                <Field label="Rechazado (kg) *">
-                  <input
-                    name="rejected"
-                    required
-                    inputMode="decimal"
-                    defaultValue="0"
-                  />
-                </Field>
-                <Field label="Frutas aprobadas (opcional)">
-                  <input name="approved_count" type="number" min="0" step="1" />
-                </Field>
-                <Field label="Frutas rechazadas (opcional)">
-                  <input name="rejected_count" type="number" min="0" step="1" />
-                </Field>
-              </div>
-              <Field label="Motivo de rechazo">
-                <select name="reason">
-                  <option value="">Sin rechazo</option>
-                  {reasons.map((r) => (
-                    <option key={r}>{r}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Calibre / tamaño">
-                <input name="size" />
-              </Field>
-              <Field label="Calidad visual (1 a 5)">
-                <select name="quality" defaultValue="">
-                  <option value="">Sin evaluar</option>
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n} / 5
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Observaciones">
-                <textarea name="notes" />
-              </Field>
-              <Submit disabled={busy} />
+              <LossFields
+                data={data}
+                receptionId={selectedReception}
+                producerId={selectedProducer}
+              />
+              <Submit
+                disabled={
+                  busy ||
+                  !data.receptions.some(
+                    (r) =>
+                      r.status !== "Cancelado" &&
+                      (!selectedProducer ||
+                        origin(data, r.id).producer?.id === selectedProducer) &&
+                      !data.classifications.some(
+                        (c) =>
+                          c.reception_id === r.id && c.status !== "Cancelado",
+                      ),
+                  )
+                }
+              >
+                Guardar selección / pérdidas
+              </Submit>
             </form>
           )}
           {dialog === "pallet" && (
@@ -2249,7 +2214,12 @@ function WorkspaceApp() {
             {newButton("Pesaje", "weight", "weigh", <Scale size={16} />)}
             {!data.classifications.some(
               (c) => c.reception_id === detail.reception?.id,
-            ) && newButton("Clasificar", "classification", "classify")}
+            ) &&
+              newButton(
+                "Registrar pérdidas / selección",
+                "classification",
+                "classify",
+              )}
             {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
           </div>
           {can(role, "correct") &&
@@ -2511,7 +2481,7 @@ function WorkspaceApp() {
           </button>
         </Modal>
       )}
-      {producer && !dialog && (
+      {producer && !dialog && !selectedReception && (
         <Modal
           title="Historial del productor"
           onClose={() => setSelectedProducer(null)}
@@ -2585,7 +2555,30 @@ function WorkspaceApp() {
                 </strong>
               </p>
             ))}
-          <h3>Calidad y rechazos</h3>
+          {can(role, "receive") && (
+            <button
+              className="button secondary full"
+              onClick={() => setDialog("reception")}
+            >
+              Nueva recepción de este productor
+            </button>
+          )}
+          <h3>Pérdidas del productor</h3>
+          {can(role, "classify") && (
+            <button
+              className="button primary full"
+              onClick={() => {
+                setSelectedReception(null);
+                setDialog("classification");
+              }}
+            >
+              Registrar pérdidas / selección
+            </button>
+          )}
+          <p className="hint">
+            Cada pérdida se vincula a una entrega y su lote. Las fotos se
+            adjuntan desde esa recepción.
+          </p>
           <p>
             Calidad media:{" "}
             <strong>
@@ -2610,6 +2603,11 @@ function WorkspaceApp() {
                 Calidad {c.quality === null ? "Sin evaluar" : c.quality + "/5"}{" "}
                 · {kg(c.rejected_kg)} kg rechazados ·{" "}
                 {c.reason || "Sin rechazo"}
+                {c.region && <span> · Región: {c.region}</span>}
+                {c.pest_observation && (
+                  <span> · Observación: {c.pest_observation}</span>
+                )}
+                {c.symptoms && <span> · {c.symptoms}</span>}
               </p>
             ))}
         </Modal>
@@ -2688,6 +2686,9 @@ interface ReceptionValues {
   classifyNow: boolean;
   rejectedKg: string;
   rejectionReason: string;
+  region: string;
+  pestObservation: string;
+  symptoms: string;
   photos: DraftPhoto[];
 }
 function ReceptionForm({
@@ -2696,6 +2697,7 @@ function ReceptionForm({
   draftKey,
   actor,
   allowSelection,
+  initialProducerId,
   onSave,
   onQuickCreate,
 }: {
@@ -2704,11 +2706,12 @@ function ReceptionForm({
   draftKey: string;
   actor: string;
   allowSelection: boolean;
+  initialProducerId: string;
   onSave: (values: ReceptionValues) => Promise<void>;
   onQuickCreate: (type: "producer" | "plot") => void;
 }) {
   const [values, setValues] = useState<ReceptionValues>({
-    producerId: "",
+    producerId: initialProducerId,
     plotId: "",
     lotId: "",
     lotCode: "",
@@ -2720,8 +2723,12 @@ function ReceptionForm({
     classifyNow: allowSelection,
     rejectedKg: "0",
     rejectionReason: "",
+    region: "",
+    pestObservation: "",
+    symptoms: "",
     photos: [],
   });
+  const weightRef = useRef<HTMLInputElement>(null);
   const [weight, setWeight] = useState("");
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
@@ -2760,6 +2767,7 @@ function ReceptionForm({
       set("weights", [...values.weights, parseKg(weight)]);
       setWeight("");
       setError("");
+      weightRef.current?.focus();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -2919,8 +2927,10 @@ function ReceptionForm({
       </Field>
       <div className="weigh-entry">
         <Field label="Agregar peso (kg)">
-          <input
+          <NumericInput
             inputMode="decimal"
+            ref={weightRef}
+            enterKeyHint="next"
             placeholder="0,00"
             value={weight}
             onChange={(e) => setWeight(e.target.value)}
@@ -2986,7 +2996,7 @@ function ReceptionForm({
           {values.classifyNow ? (
             <>
               <Field label="Pérdidas / rechazado (kg)">
-                <input
+                <NumericInput
                   inputMode="decimal"
                   value={values.rejectedKg}
                   onChange={(e) => set("rejectedKg", e.target.value)}
@@ -3006,6 +3016,40 @@ function ReceptionForm({
                   </select>
                 </Field>
               )}
+              <details className="loss-details">
+                <summary>Región y observaciones de campo (opcional)</summary>
+                <Field label="Región / comunidad">
+                  <input
+                    value={values.region}
+                    placeholder={
+                      data.producers.find((p) => p.id === values.producerId)
+                        ?.community || "Comunidad de origen"
+                    }
+                    onChange={(e) => set("region", e.target.value)}
+                    maxLength={160}
+                  />
+                </Field>
+                <Field label="Posible plaga observada">
+                  <input
+                    value={values.pestObservation}
+                    onChange={(e) => set("pestObservation", e.target.value)}
+                    placeholder="Nombre, si se conoce"
+                    maxLength={200}
+                  />
+                </Field>
+                <Field label="Señales observadas">
+                  <textarea
+                    value={values.symptoms}
+                    onChange={(e) => set("symptoms", e.target.value)}
+                    placeholder="Daño, manchas, insectos u otros signos"
+                    maxLength={2000}
+                  />
+                </Field>
+                <p className="hint">
+                  Registro para revisión técnica; no es un diagnóstico. Puede
+                  adjuntar una foto abajo.
+                </p>
+              </details>
               <p className="hint">
                 Aprobado:{" "}
                 {kg(
@@ -3146,7 +3190,7 @@ function PalletForm({
       </div>
       <div className="form-grid">
         <Field label="Cantidad de pallets iguales *">
-          <input
+          <NumericInput
             name="count"
             type="number"
             required
@@ -3154,23 +3198,30 @@ function PalletForm({
             max="100"
             step="1"
             defaultValue="1"
+            inputMode="numeric"
           />
         </Field>
         <Field label="Destino *">
           <input name="destination" required defaultValue="Uruguay" />
         </Field>
         <Field label="Peso neto por pallet (kg) *">
-          <input name="net" inputMode="decimal" required />
+          <NumericInput name="net" inputMode="decimal" required />
         </Field>
         <Field label="Peso bruto por pallet (kg), si se conoce">
-          <input name="gross" inputMode="decimal" />
+          <NumericInput name="gross" inputMode="decimal" />
         </Field>
       </div>
       <Field label="Fecha de pesaje del pallet (si se conoce)">
         <input type="date" name="weighed_date" />
       </Field>
       <Field label="Cantidad de frutas por pallet">
-        <input name="fruits" type="number" min="0" step="1" />
+        <NumericInput
+          name="fruits"
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+        />
       </Field>
       <Field label="Responsable *">
         <input name="responsible" required defaultValue={actor} />
@@ -3190,6 +3241,7 @@ function Reports({
   onError: (message: string) => void;
 }) {
   const [kind, setKind] = useState("Recepción");
+  const [lossThreshold, setLossThreshold] = useState("5");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [producer, setProducer] = useState("");
@@ -3272,16 +3324,55 @@ function Reports({
             };
           }),
       );
+  const regional = regionalLosses(data, from, to, producer);
+  const threshold = Number(lossThreshold.replace(",", "."));
+  const validThreshold =
+    lossThreshold.trim() !== "" &&
+    Number.isFinite(threshold) &&
+    threshold > 0 &&
+    threshold <= 100;
+  if (kind === "Pérdidas por región")
+    report = regional.map((r) => ({
+      Región: r.region,
+      Productores: r.producers,
+      Recepciones: r.receptions,
+      Seleccionadas: r.classified,
+      Recibido_kg: r.received,
+      Evaluado_kg: r.assessed,
+      Pérdidas_kg: r.rejected,
+      Índice_porcentaje: r.rate ?? "Sin selección",
+      Observaciones_de_campo: r.observations,
+      Seguimiento:
+        r.region === "Región sin informar"
+          ? "Completar región"
+          : r.classified < 2
+            ? "Datos iniciales"
+            : validThreshold && (r.rate ?? 0) >= threshold
+              ? "Revisar registros"
+              : "Seguimiento habitual",
+    }));
   if (kind === "Rechazos")
     report = data.classifications
-      .filter((c) => c.rejected_kg > 0 && includedReception(c.reception_id))
+      .filter(
+        (c) =>
+          c.status !== "Cancelado" &&
+          c.rejected_kg > 0 &&
+          includedReception(c.reception_id),
+      )
       .map((c) => {
         const o = origin(data, c.reception_id);
         return {
           Fecha: dateLabel(o.reception!.date),
           Productor: o.producer?.name ?? "",
           Lote: o.lot?.code ?? "",
+          Región:
+            c.region ||
+            o.plot?.location ||
+            o.producer?.community ||
+            "Sin informar",
           Rechazado_kg: c.rejected_kg,
+          Posible_plaga: c.pest_observation || "Sin observación",
+          Señales: c.symptoms || "",
           Motivo: c.reason,
           Calidad: c.quality ?? "Sin evaluar",
         };
@@ -3311,6 +3402,7 @@ function Reports({
               "Pallet",
               "Expedición",
               "Rechazos",
+              "Pérdidas por región",
               "Exportación",
             ].map((k) => (
               <option key={k}>{k}</option>
@@ -3352,6 +3444,63 @@ function Reports({
           />
         </Field>
       </div>
+      {kind === "Pérdidas por región" && (
+        <section className="regional-followup">
+          <h2>Seguimiento de pérdidas por región</h2>
+          <p className="hint">
+            Índice = kg perdidos / kg de las entregas seleccionadas. Las
+            entregas sin selección no se cuentan como cero pérdidas. Una pérdida
+            no confirma una plaga.
+          </p>
+          <Field label="Referencia de revisión (%)">
+            <NumericInput
+              value={lossThreshold}
+              onChange={(e) => setLossThreshold(e.target.value)}
+            />
+          </Field>
+          <p className="hint">
+            Referencia operativa ajustable, no un límite técnico. “Revisar
+            registros” requiere al menos dos entregas seleccionadas y una región
+            informada.
+          </p>
+          {!validThreshold && (
+            <p role="status">
+              Ingrese una referencia mayor que 0 y hasta 100%.
+            </p>
+          )}
+          <div className="regional-grid">
+            {regional.map((r) => (
+              <article className="regional-card" key={r.region}>
+                <h3>{r.region}</h3>
+                <strong>
+                  {r.rate === null
+                    ? "Sin selección"
+                    : kg(r.rate) + "% de pérdidas"}
+                </strong>
+                <p>
+                  {kg(r.rejected)} kg perdidos · {kg(r.assessed)} kg evaluados
+                </p>
+                <p>
+                  {r.producers} productores · {r.classified} / {r.receptions}{" "}
+                  entregas seleccionadas
+                </p>
+                <Badge>
+                  {r.region === "Región sin informar"
+                    ? "Completar región"
+                    : r.classified < 2
+                      ? "Datos iniciales"
+                      : validThreshold && (r.rate ?? 0) >= threshold
+                        ? "Revisar registros"
+                        : "Seguimiento habitual"}
+                </Badge>
+                {r.observations > 0 && (
+                  <p>{r.observations} registros con observaciones de campo</p>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="toolbar">
         <p>{report.length} registros</p>
         <div className="row">
