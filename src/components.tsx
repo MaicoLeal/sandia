@@ -110,10 +110,20 @@ export function Label({
   pallet,
   data,
   onPrinted,
+  pending = false,
+  busy = false,
+  online = true,
+  syncError = "",
+  onSync,
 }: {
   pallet: Pallet;
   data: Data;
   onPrinted: () => Promise<void>;
+  pending?: boolean;
+  busy?: boolean;
+  online?: boolean;
+  syncError?: string;
+  onSync?: () => Promise<void>;
 }) {
   const [qr, setQr] = useState("");
   const [error, setError] = useState("");
@@ -129,6 +139,7 @@ export function Label({
       .catch(() => setError("No se pudo generar el QR."));
   }, [link]);
   const print = async () => {
+    setError("");
     try {
       await onPrinted();
       window.print();
@@ -196,6 +207,34 @@ export function Label({
         consultar productor, lote y origen completo, inicie sesión con una
         cuenta de la cooperativa.
       </p>
+      {pending && (
+        <div className="setting-info no-print" role="status">
+          <div>
+            <strong>
+              {busy ? "Sincronizando…" : "Etiqueta pendiente de sincronizar"}
+            </strong>
+            <p>
+              {online
+                ? "Confirme los datos en Supabase antes de imprimir o descargar el QR."
+                : "Conecte el celular a internet. Sus datos siguen guardados en este dispositivo."}
+            </p>
+            {onSync && (
+              <button
+                className="button secondary"
+                disabled={busy || !online}
+                onClick={() => void onSync()}
+              >
+                Sincronizar
+              </button>
+            )}
+            {syncError && (
+              <p className="error" role="alert">
+                {syncError}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -205,12 +244,12 @@ export function Label({
         <button
           className="button primary"
           onClick={() => void print()}
-          disabled={!qr}
+          disabled={!qr || pending || busy}
         >
           <Printer size={18} />
           Imprimir / PDF
         </button>
-        {qr && (
+        {qr && !pending && !busy && (
           <a
             className="button secondary"
             download={pallet.code + "-qr.png"}

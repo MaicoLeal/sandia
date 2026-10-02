@@ -2160,10 +2160,21 @@ function WorkspaceApp() {
         <Modal title="Etiqueta y QR de pallet" onClose={close}>
           <Label
             data={data}
-            pallet={label}
+            pallet={data.pallets.find((p) => p.id === label.id) ?? label}
+            pending={
+              !workspace.localOnly &&
+              Boolean(workspace.pending || workspace.needsRefresh)
+            }
+            busy={busy}
+            online={online}
+            syncError={error}
+            onSync={sync}
             onPrinted={async () => {
               allowed("pallet");
-              if (!workspace.localOnly && workspace.pending)
+              if (
+                !workspace.localOnly &&
+                (workspace.pending || workspace.needsRefresh)
+              )
                 throw new Error(
                   "Sincronice antes de imprimir los códigos definitivos de lote y pallet.",
                 );
