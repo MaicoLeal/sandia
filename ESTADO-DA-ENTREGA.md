@@ -3,7 +3,7 @@
 - Aplicação implementada em React, TypeScript, Vite e Tailwind.
 - Supabase configurado em `.env.local`, fora do Git; organização Cooperativa Agronorte criada.
 - Cinco migrações aplicadas no Supabase: esquema inicial, motivos de correção, recepção com campos ainda não informados, correção auditada de data e seleção rápida/data de pesagem/rastreabilidade autenticada.
-- Contas Auth criadas no painel pelo proprietário e conferidas. Ainda estão sem perfil e organização vinculados. A vinculação administrativa foi preparada e aguarda confirmação dos acessos pelo proprietário; esse vínculo é necessário para carregar os registros no celular.
+- As duas contas Auth criadas pelo proprietário foram vinculadas como administradoras ativas da Cooperativa Agronorte após sua confirmação explícita. A atribuição ficou registrada na auditoria. A leitura dos registros e do QR privado sob o papel authenticated foi conferida no SQL Editor para ambas as contas; login e escrita entre dispositivos ainda precisam de homologação pelo operador.
 - Dados reais iniciais gravados no Supabase; quantidades, soma e datas conferidas. Tokens QR e histórico preservados. Campos desconhecidos não foram presumidos. Os registros operacionais não fazem parte deste repositório público.
 - Demonstração removida da aplicação; a inicialização abre um espaço vazio. Atualizações removem somente o antigo espaço demo, seus rascunhos e anexos; dados reais e espaços autenticados são preservados.
 - O aplicativo sem login guarda registros reais somente no dispositivo, com aviso explícito. Não há transferência automática desse espaço para uma conta autenticada.
