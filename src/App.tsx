@@ -252,9 +252,17 @@ function WorkspaceApp() {
   }, []);
   useEffect(() => {
     const fn = () => setUpdateAvailable(true);
+    const failed = () =>
+      setError(
+        "No se pudo actualizar. Guarde su trabajo y vuelva a abrir la aplicación.",
+      );
     window.addEventListener("app-update", fn);
-    return () => window.removeEventListener("app-update", fn);
-  }, []);
+    window.addEventListener("app-update-error", failed);
+    return () => {
+      window.removeEventListener("app-update", fn);
+      window.removeEventListener("app-update-error", failed);
+    };
+  }, [setError]);
   if (needsLogin) return <LoginScreen error={error} onError={setError} />;
   if (!workspace)
     return (
@@ -674,10 +682,20 @@ function WorkspaceApp() {
             </div>
           )}
           {updateAvailable && (
-            <p className="hint">
-              Hay una actualización disponible. Guarde su trabajo y vuelva a
-              abrir la aplicación.
-            </p>
+            <div className="row update-notice">
+              <p className="hint">
+                Hay una nueva versión. Guarde su trabajo antes de actualizar.
+              </p>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() =>
+                  window.dispatchEvent(new Event("app-update-apply"))
+                }
+              >
+                Actualizar aplicación
+              </button>
+            </div>
           )}
           <div className="page-heading">
             <div>
@@ -1071,9 +1089,7 @@ function WorkspaceApp() {
                               </div>
                               <h3>{p.code}</h3>
                               <p className="pallet-origin">
-                                <strong>
-                                  {o.producer?.name || group.name}
-                                </strong>
+                                <strong>{group.name}</strong>
                                 <span>
                                   Lote: {o.lot?.code || "Pendiente de informar"}
                                 </span>

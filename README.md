@@ -66,6 +66,8 @@ O workflow `.github/workflows/pages.yml` valida lint, testes e build antes de pu
 
 IndexedDB guarda o espaço, os anexos e rascunhos. A aplicação instalada/cacheada pode ser reaberta offline depois do primeiro acesso. Mudanças autenticadas ficam pendentes e são sincronizadas quando há conexão, com confirmação do servidor. O botão Sincronizar permite tentar novamente. Uma falha não apaga os registros locais.
 
+Quando houver uma nova versão, salve o trabalho e toque em "Actualizar aplicación" para ativar a atualização da PWA. Instalações antigas que ainda não exibem esse botão precisam fechar as abas do aplicativo e reabri-lo para receber a primeira atualização.
+
 A sincronização utiliza uma revisão por organização e uma transação completa. Se duas pessoas modificarem a mesma revisão, a segunda recebe conflito e conserva seus dados locais. Esta primeira versão **não mescla automaticamente conflitos**. É necessário conciliar com o gestor, usando uma cópia/exportação local antes de atualizar o espaço. Para operação simultânea de grande volume, evoluir para fila de operações por entidade e resolução de conflitos dedicada; a estrutura atual evita sobrescrita silenciosa.
 
 No navegador, armazenamento local e sessão dependem do acesso ao dispositivo. Sair da conta não elimina a cópia offline, e o navegador pode remover dados por políticas de armazenamento. Use contas e dispositivos controlados pela cooperativa.
