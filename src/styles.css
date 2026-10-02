@@ -1780,3 +1780,4 @@ th {
 .regional-card h3 {
   margin-top: 0;
 }
+.producer-actions { display: grid; gap: 10px; margin: 16px 0; }

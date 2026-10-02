@@ -2488,6 +2488,35 @@ function WorkspaceApp() {
         >
           <Badge>{producer.status}</Badge>
           <h2>{producer.name}</h2>
+          <p>
+            Pérdidas registradas:{" "}
+            <strong>
+              {kg(producerQuality.reduce((sum, c) => sum + c.rejected_kg, 0))}{" "}
+              kg
+            </strong>
+          </p>
+          <div className="producer-actions">
+            {can(role, "receive") && (
+              <button
+                className="button secondary full"
+                onClick={() => setDialog("reception")}
+              >
+                Nueva recepción de este productor
+              </button>
+            )}
+            {can(role, "classify") && (
+              <button
+                className="button primary full"
+                onClick={() => {
+                  setSelectedReception(null);
+                  setDialog("classification");
+                }}
+              >
+                Registrar pérdidas / selección
+              </button>
+            )}
+          </div>
+
           {can(role, "correct") && (
             <button
               className="button secondary"
@@ -2555,26 +2584,7 @@ function WorkspaceApp() {
                 </strong>
               </p>
             ))}
-          {can(role, "receive") && (
-            <button
-              className="button secondary full"
-              onClick={() => setDialog("reception")}
-            >
-              Nueva recepción de este productor
-            </button>
-          )}
           <h3>Pérdidas del productor</h3>
-          {can(role, "classify") && (
-            <button
-              className="button primary full"
-              onClick={() => {
-                setSelectedReception(null);
-                setDialog("classification");
-              }}
-            >
-              Registrar pérdidas / selección
-            </button>
-          )}
           <p className="hint">
             Cada pérdida se vincula a una entrega y su lote. Las fotos se
             adjuntan desde esa recepción.
