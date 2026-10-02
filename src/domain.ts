@@ -1,4 +1,4 @@
-import type { Base, Data, Role } from "./types";
+import type { Base, Data, Role, Pallet } from "./types";
 export const LOCAL_ORG = "20000000-0000-4000-8000-000000000001";
 export const LOCAL_KEY = "local:agronorte";
 export const now = () => new Date().toISOString();
@@ -75,6 +75,55 @@ export function receptionTotal(data: Data, id: string) {
       .filter((x) => x.reception_id === id && x.status !== "Cancelado")
       .map((x) => x.kg),
   ).total;
+}
+export function groupPalletsByProducer(data: Data, pallets = data.pallets) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      name: string;
+      producerIds: string[];
+      pallets: Pallet[];
+      netKg: number;
+    }
+  >();
+  for (const pallet of pallets) {
+    const producers = new Map(
+      data.pallet_items
+        .filter((item) => item.pallet_id === pallet.id)
+        .map((item) => origin(data, item.reception_id).producer)
+        .filter((producer) => producer !== undefined)
+        .map((producer) => [producer.id, producer]),
+    );
+    const ids = [...producers.keys()].sort();
+    const key = ids.join("/") || "unknown";
+    if (!groups.has(key))
+      groups.set(key, {
+        key,
+        name:
+          [...producers.values()]
+            .map((p) => p.name)
+            .sort((a, b) => a.localeCompare(b, "es"))
+            .join(" / ") || "Productor pendiente de identificar",
+        producerIds: ids,
+        pallets: [],
+        netKg: 0,
+      });
+    const group = groups.get(key)!;
+    group.pallets.push(pallet);
+    if (pallet.status !== "Cancelado")
+      group.netKg = round(group.netKg + pallet.net_kg);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.name.localeCompare(b.name, "es"))
+    .map((group) => ({
+      ...group,
+      pallets: group.pallets.sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) ||
+          a.code.localeCompare(b.code),
+      ),
+    }));
 }
 export function available(data: Data, id: string) {
   const selected = data.classifications.find(

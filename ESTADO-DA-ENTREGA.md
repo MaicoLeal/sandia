@@ -13,7 +13,9 @@
 - Navegação mobile já conferida em viewport 390 × 844; rascunhos locais e abertura da PWA compilada após desligar o servidor de prévia verificados.
 - Fixtures de teste permanecem isoladas e não são carregadas no aplicativo.
 
-Validação desta atualização: lint sem erros, 20 testes aprovados e build de produção concluído com service worker. Os testes PostgreSQL cobrem RLS, revisão, peso, saldo, auditoria, cancelamento, origem, correção de data, perdas e separação entre QR público e origem autenticada.
+Validação desta atualização: lint sem erros, 21 testes aprovados e build de produção concluído com service worker. Os testes PostgreSQL cobrem RLS, revisão, peso, saldo, auditoria, cancelamento, origem, correção de data, perdas e separação entre QR público e origem autenticada. O agrupamento por produtor foi testado com múltiplas origens, sem duplicar peso.
+
+Pallets agora aparecem em grupos por produtor, com filtros de produtor e busca por código, lote ou peso. Produtor, lote, data, peso e botão "Etiqueta / QR" foram conferidos em viewport de 390 × 844, sem rolagem horizontal. A busca e a abertura do QR foram verificadas usando os registros locais reais, sem criar novos registros.
 
 Ainda precisam de homologação com uma conta real: login Auth, Storage e sincronização entre dispositivos. APK e integrações de hardware não foram gerados.
 

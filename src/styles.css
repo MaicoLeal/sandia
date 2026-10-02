@@ -753,7 +753,7 @@ footer {
   text-align: left;
 }
 .producer-card h2,
-.pallet-card h2 {
+.pallet-card h3 {
   margin-top: 18px;
   overflow-wrap: anywhere;
   font-size: 16px;
@@ -1680,4 +1680,71 @@ th {
 .login-screen .panel {
   padding: 24px;
   margin-top: 24px;
+}
+.pallet-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.pallet-filters .field {
+  margin-bottom: 0;
+}
+.pallet-groups {
+  display: grid;
+  gap: 28px;
+}
+.pallet-producer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 16px;
+  border-left: 4px solid #36741b;
+  background: #eef4e7;
+  border-radius: 8px;
+}
+.pallet-producer-heading span {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #526b3e;
+}
+.pallet-producer-heading h2 {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+.pallet-producer-heading p {
+  font-size: 13px;
+  color: #435638;
+}
+.pallet-card .pallet-origin {
+  display: grid;
+  gap: 5px;
+  color: #526344;
+}
+.pallet-origin strong {
+  color: #273b20;
+  font-size: 14px;
+}
+.pallet-label-button {
+  flex: 1;
+}
+@media (max-width: 780px) {
+  .pallet-filters {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .pallet-producer-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .pallet-card h3 {
+    font-size: 16px;
+  }
+  .pallet-card p {
+    font-size: 13px;
+    color: #526344;
+  }
 }

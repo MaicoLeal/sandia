@@ -1,7 +1,9 @@
 import { seed } from "./test-fixtures";
+import type { Data, Pallet } from "./types";
 import { describe, it, expect } from "vitest";
 import {
   intakeSelection,
+  groupPalletsByProducer,
   assertClassification,
   assertPallet,
   available,
@@ -15,6 +17,64 @@ import {
   summary,
 } from "./domain";
 describe("recepción y trazabilidad", () => {
+  it("agrupa pallets por todas sus procedencias sin duplicar peso", () => {
+    const d: Data = seed();
+    const org = d.producers[0].organization_id;
+    const second = { ...d.producers[0], ...base(org), name: "Otro productor" };
+    d.producers.push(second);
+    const lot = {
+      ...d.field_lots[0],
+      ...base(org),
+      plot_id: null,
+      producer_id: second.id,
+      code: "OTRO",
+    };
+    d.field_lots.push(lot);
+    const reception = { ...d.receptions[0], ...base(org), lot_id: lot.id };
+    d.receptions.push(reception);
+    const pallet = (code: string, net_kg: number): Pallet => ({
+      ...base(org, "En armado"),
+      code,
+      token: crypto.randomUUID(),
+      destination: "Pendiente",
+      assembled_at: "2026-10-02",
+      responsible: "Operador",
+      gross_kg: null,
+      net_kg,
+      fruit_count: null,
+      notes: "",
+    });
+    const first = pallet("P1", 100),
+      other = pallet("P2", 200),
+      mixed = pallet("P3", 300);
+    d.pallets.push(first, other, mixed);
+    for (const [p, r, weight] of [
+      [first, d.receptions[0], 100],
+      [other, reception, 200],
+      [mixed, d.receptions[0], 150],
+      [mixed, reception, 150],
+    ] as const)
+      d.pallet_items.push({
+        ...base(org),
+        pallet_id: p.id,
+        reception_id: r.id,
+        kg: weight,
+      });
+    const groups = groupPalletsByProducer(d);
+    expect(groups).toHaveLength(3);
+    expect(groups.find((g) => g.producerIds.length === 2)?.netKg).toBe(300);
+    expect(groups.reduce((s, g) => s + g.netKg, 0)).toBe(600);
+    expect(
+      groups
+        .flatMap((g) => g.pallets)
+        .map((p) => p.id)
+        .sort(),
+    ).toEqual(d.pallets.map((p) => p.id).sort());
+    other.status = "Cancelado";
+    expect(
+      groupPalletsByProducer(d).find((g) => g.key === second.id)?.netKg,
+    ).toBe(0);
+  });
   it("abre el sistema sin registros de demostración", () => {
     expect(Object.values(emptyData()).every((rows) => rows.length === 0)).toBe(
       true,

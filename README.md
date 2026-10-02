@@ -46,6 +46,7 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 - Na própria recepção, marque seleção e informe perdas em kg e motivo; a soma aprovada é calculada automaticamente. Desmarque essa opção quando ainda estiver pesando, para classificar depois. Fotos da carga/perda são opcionais e ficam no rascunho antes da confirmação. Quantidade de frutas é opcional e não interfere no saldo em kg.
 - Crie um ou vários pallets iguais por operação, informando o peso líquido; bruto/tara podem ficar pendentes. O sistema verifica o saldo aprovado antes de alocar.
 - Consulte/imprima a etiqueta e marque o pallet listo para carga.
+- Pallets são separados por produtor, com quantidade e peso do grupo. Use o filtro de produtor e a busca por código, lote ou peso para localizar a etiqueta. O botão "Etiqueta / QR" abre a impressão e o download do QR também no celular.
 - No modo conectado, sincronize os pallets antes de expedir. A expedição exige destino comum e pallets disponíveis; a transação no servidor impede dupla alocação e dupla expedição.
 - Informes inclui recepção, produtor, lote, pallet, rejeições, expedição e exportação. CSV abre no Excel; PDF é obtido com “Guardar como PDF” no diálogo de impressão.
 

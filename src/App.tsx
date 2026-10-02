@@ -33,6 +33,7 @@ import type {
 } from "./types";
 import {
   intakeSelection,
+  groupPalletsByProducer,
   assertClassification,
   assertPallet,
   available,
@@ -242,6 +243,8 @@ function WorkspaceApp() {
   const [palletToken, setPalletToken] = useState(() =>
     new URLSearchParams(location.search).get("pallet"),
   );
+  const [palletProducerId, setPalletProducerId] = useState("");
+  const [palletSearch, setPalletSearch] = useState("");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const close = useCallback(() => {
     setDialog(null);
@@ -264,6 +267,29 @@ function WorkspaceApp() {
   const visiblePallets = palletToken
     ? data.pallets.filter((p) => p.token === palletToken)
     : data.pallets;
+  const palletGroups = groupPalletsByProducer(
+    data,
+    visiblePallets.filter((p) => {
+      const origins = data.pallet_items
+        .filter((item) => item.pallet_id === p.id)
+        .map((item) => origin(data, item.reception_id));
+      if (
+        palletProducerId &&
+        !origins.some((o) => o.producer?.id === palletProducerId)
+      )
+        return false;
+      return [
+        p.code,
+        p.net_kg,
+        kg(p.net_kg),
+        p.destination,
+        ...origins.flatMap((o) => [o.producer?.name, o.lot?.code]),
+      ]
+        .join(" ")
+        .toLocaleLowerCase("es")
+        .includes(palletSearch.trim().toLocaleLowerCase("es"));
+    }),
+  );
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
   const actor = workspace.profile?.name ?? "Operador local";
@@ -981,6 +1007,29 @@ function WorkspaceApp() {
                 </p>
                 {newButton("Crear pallet", "pallet", "pallet")}
               </div>
+              <div className="pallet-filters panel">
+                <Field label="Filtrar por productor">
+                  <select
+                    value={palletProducerId}
+                    onChange={(e) => setPalletProducerId(e.target.value)}
+                  >
+                    <option value="">Todos los productores</option>
+                    {data.producers.map((producer) => (
+                      <option key={producer.id} value={producer.id}>
+                        {producer.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Buscar pallet, lote o peso">
+                  <input
+                    type="search"
+                    value={palletSearch}
+                    onChange={(e) => setPalletSearch(e.target.value)}
+                    placeholder="Código, lote o kg"
+                  />
+                </Field>
+              </div>
               {palletToken && (
                 <div className="toolbar">
                   <p>Consulta del pallet escaneado</p>
@@ -992,98 +1041,130 @@ function WorkspaceApp() {
                   </button>
                 </div>
               )}
-              <div className="card-grid">
-                {visiblePallets.length ? (
-                  visiblePallets.map((p) => {
-                    const item = data.pallet_items.find(
-                      (i) => i.pallet_id === p.id,
-                    );
-                    const o = origin(data, item?.reception_id ?? "");
-                    return (
-                      <section key={p.id} className="panel pallet-card">
-                        <div className="row">
-                          <span className="record-icon">
-                            <Box />
-                          </span>
-                          <Badge>{p.status}</Badge>
+              <div className="pallet-groups">
+                {palletGroups.length ? (
+                  palletGroups.map((group) => (
+                    <section className="pallet-producer-group" key={group.key}>
+                      <header className="pallet-producer-heading">
+                        <div>
+                          <span>PRODUCTOR</span>
+                          <h2>{group.name}</h2>
                         </div>
-                        <h2>{p.code}</h2>
                         <p>
-                          {o.producer?.name} · {o.lot?.code}
+                          {group.pallets.length} pallets ·{" "}
+                          <strong>{kg(group.netKg)} kg netos</strong>
                         </p>
-                        <strong className="big-number">
-                          {kg(p.net_kg)} <small>kg netos</small>
-                        </strong>
-                        <p>
-                          Destino: <strong>{p.destination}</strong>
-                        </p>
-                        <p className="hint">
-                          Bruto:{" "}
-                          {p.gross_kg === null
-                            ? "Sin informar"
-                            : kg(p.gross_kg) + " kg"}{" "}
-                          · Tara:{" "}
-                          {p.gross_kg === null
-                            ? "Sin tara registrada"
-                            : kg(p.gross_kg - p.net_kg) + " kg"}
-                        </p>
-                        <div className="row">
-                          <button
-                            className="button secondary"
-                            onClick={() => setLabel(p)}
-                          >
-                            <FileText size={16} />
-                            Etiqueta
-                          </button>
-                          <button
-                            className="link"
-                            onClick={() =>
-                              setSelectedReception(item?.reception_id ?? null)
-                            }
-                          >
-                            Origen <ArrowRight size={16} />
-                          </button>
-                        </div>
-                        {p.status !== "Expedido" &&
-                          p.status !== "Cancelado" &&
-                          can(role, "pallet") && (
-                            <button
-                              className="button secondary full"
-                              disabled={busy || p.status === "Listo para carga"}
-                              onClick={() =>
-                                void run(() =>
-                                  commit((d) => {
-                                    allowed("pallet");
-                                    const value = d.pallets.find(
-                                      (x) => x.id === p.id,
-                                    )!;
-                                    const before = structuredClone(value);
-                                    value.status = "Listo para carga";
-                                    value.updated_at = now();
-                                    record(
-                                      d,
-                                      "pallets",
-                                      value.id,
-                                      "Pallet listo para carga",
-                                      before,
-                                      value,
-                                    );
-                                  }),
-                                )
-                              }
-                            >
-                              Marcar listo para carga
-                            </button>
-                          )}
-                        {attachments("pallets", p.id)}
-                      </section>
-                    );
-                  })
+                      </header>
+                      <div className="card-grid">
+                        {group.pallets.map((p) => {
+                          const item = data.pallet_items.find(
+                            (i) => i.pallet_id === p.id,
+                          );
+                          const o = origin(data, item?.reception_id ?? "");
+                          return (
+                            <section key={p.id} className="panel pallet-card">
+                              <div className="row">
+                                <span className="record-icon">
+                                  <Box />
+                                </span>
+                                <Badge>{p.status}</Badge>
+                              </div>
+                              <h3>{p.code}</h3>
+                              <p className="pallet-origin">
+                                <strong>
+                                  {o.producer?.name || group.name}
+                                </strong>
+                                <span>
+                                  Lote: {o.lot?.code || "Pendiente de informar"}
+                                </span>
+                                {o.reception && (
+                                  <span>
+                                    Recepción: {dateLabel(o.reception.date)}
+                                  </span>
+                                )}
+                              </p>
+                              <strong className="big-number">
+                                {kg(p.net_kg)} <small>kg netos</small>
+                              </strong>
+                              <p>
+                                Destino: <strong>{p.destination}</strong>
+                              </p>
+                              <p className="hint">
+                                Bruto:{" "}
+                                {p.gross_kg === null
+                                  ? "Sin informar"
+                                  : kg(p.gross_kg) + " kg"}{" "}
+                                · Tara:{" "}
+                                {p.gross_kg === null
+                                  ? "Sin tara registrada"
+                                  : kg(p.gross_kg - p.net_kg) + " kg"}
+                              </p>
+                              <div className="row">
+                                <button
+                                  className="button primary pallet-label-button"
+                                  onClick={() => setLabel(p)}
+                                >
+                                  <FileText size={16} />
+                                  Etiqueta / QR
+                                </button>
+                                <button
+                                  className="link"
+                                  onClick={() =>
+                                    setSelectedReception(
+                                      item?.reception_id ?? null,
+                                    )
+                                  }
+                                >
+                                  Origen <ArrowRight size={16} />
+                                </button>
+                              </div>
+                              {p.status !== "Expedido" &&
+                                p.status !== "Cancelado" &&
+                                can(role, "pallet") && (
+                                  <button
+                                    className="button secondary full"
+                                    disabled={
+                                      busy || p.status === "Listo para carga"
+                                    }
+                                    onClick={() =>
+                                      void run(() =>
+                                        commit((d) => {
+                                          allowed("pallet");
+                                          const value = d.pallets.find(
+                                            (x) => x.id === p.id,
+                                          )!;
+                                          const before = structuredClone(value);
+                                          value.status = "Listo para carga";
+                                          value.updated_at = now();
+                                          record(
+                                            d,
+                                            "pallets",
+                                            value.id,
+                                            "Pallet listo para carga",
+                                            before,
+                                            value,
+                                          );
+                                        }),
+                                      )
+                                    }
+                                  >
+                                    Marcar listo para carga
+                                  </button>
+                                )}
+                              {attachments("pallets", p.id)}
+                            </section>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))
                 ) : (
                   <Empty>
                     {palletToken
                       ? "No se encontró este pallet en su organización."
-                      : "Cree el primer pallet después de clasificar una recepción."}
+                      : data.pallets.length
+                        ? "No hay pallets con estos filtros. Cambie el productor o la búsqueda."
+                        : "Cree el primer pallet después de clasificar una recepción."}
                   </Empty>
                 )}
               </div>
@@ -2095,7 +2176,7 @@ function WorkspaceApp() {
         </Modal>
       )}
       {label && (
-        <Modal title="Etiqueta de pallet" onClose={close}>
+        <Modal title="Etiqueta y QR de pallet" onClose={close}>
           <Label
             data={data}
             pallet={label}

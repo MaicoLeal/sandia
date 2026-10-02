@@ -202,7 +202,7 @@ export function Label({
             href={qr}
           >
             <Download size={18} />
-            QR
+            Descargar QR
           </a>
         )}
       </div>
