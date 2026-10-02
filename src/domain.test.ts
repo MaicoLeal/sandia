@@ -81,4 +81,12 @@ describe("recepción y trazabilidad", () => {
     expect(can("auditor", "receive")).toBe(false);
     expect(can("gestor", "correct")).toBe(true);
   });
+  it("excluye recepciones canceladas sin perder el historial de pesajes", () => {
+    const data = seed();
+    const r = data.receptions[0];
+    r.status = "Cancelado";
+    expect(receptionTotal(data, r.id)).toBe(0);
+    expect(data.reception_weights).toHaveLength(9);
+    expect(() => assertClassification(data, r.id, 0, 0)).toThrow("activa");
+  });
 });

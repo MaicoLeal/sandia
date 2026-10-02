@@ -1140,13 +1140,13 @@ th {
   justify-content: center;
 }
 .print-label h2 {
-  font-size: 30px;
-  margin-top: 20px;
+  font-size: 26px;
+  margin-top: 12px;
 }
 .label-code {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
-  margin: 12px 0;
+  margin: 8px 0;
   overflow-wrap: anywhere;
 }
 .label-details {
@@ -1608,12 +1608,28 @@ th {
   object-fit: contain;
 }
 .print-label .brand img {
-  width: 240px;
-  max-height: 120px;
+  width: 180px;
+  max-height: 80px;
+  margin: 0;
 }
 @media (max-width: 780px) {
   .brand img {
     width: 150px;
     max-height: 60px;
+  }
+}
+
+@media print {
+  .print-label {
+    padding: 16px;
+  }
+  .label-details p {
+    margin: 6px 0;
+    font-size: 11px;
+  }
+  .print-label > img {
+    width: 140px;
+    height: 140px;
+    margin: 10px auto;
   }
 }

@@ -95,6 +95,8 @@ export function assertClassification(
   approved: number,
   rejected: number,
 ) {
+  if (!data.receptions.some((r) => r.id === id && r.status !== "Cancelado"))
+    throw new Error("Seleccione una recepción activa.");
   if (
     approved < 0 ||
     rejected < 0 ||

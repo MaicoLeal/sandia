@@ -313,6 +313,13 @@ function WorkspaceApp() {
         ),
       )
     : [];
+  const producerQuality = data.classifications.filter(
+    (c) =>
+      c.status !== "Cancelado" &&
+      producerReceptions.some(
+        (r) => r.id === c.reception_id && r.status !== "Cancelado",
+      ),
+  );
   const recent = [...data.receptions]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);
@@ -367,6 +374,7 @@ function WorkspaceApp() {
       } else allowed(type === "pallets" ? "pallet" : "ship");
       if (file.size > 10 * 1024 * 1024)
         throw new Error("Máximo 10 MB por archivo.");
+      if (file.size === 0) throw new Error("El archivo está vacío.");
       if (
         ![
           "image/jpeg",
@@ -1900,6 +1908,10 @@ function WorkspaceApp() {
             pallet={label}
             onPrinted={async () => {
               allowed("pallet");
+              if (!workspace.demo && workspace.pending)
+                throw new Error(
+                  "Sincronice antes de imprimir los códigos definitivos de lote y pallet.",
+                );
               await commit((d) => {
                 const p = d.pallets.find((p) => p.id === label.id)!;
                 const before = structuredClone(p);
@@ -2014,6 +2026,11 @@ function WorkspaceApp() {
                           allowed("correct");
                           const value = parseKg(input);
                           await commit((d) => {
+                            if (
+                              d.receptions.find((r) => r.id === w.reception_id)
+                                ?.status === "Cancelado"
+                            )
+                              throw new Error("La recepción está cancelada.");
                             if (
                               d.classifications.some(
                                 (c) => c.reception_id === w.reception_id,
@@ -2216,6 +2233,21 @@ function WorkspaceApp() {
               </p>
             ))}
           <h3>Calidad y rechazos</h3>
+          <p>
+            Calidad media:{" "}
+            <strong>
+              {producerQuality.length
+                ? kg(
+                    producerQuality.reduce((s, c) => s + c.quality, 0) /
+                      producerQuality.length,
+                  ) + " / 5"
+                : "Sin clasificar"}
+            </strong>{" "}
+            · Rechazos:{" "}
+            <strong>
+              {kg(producerQuality.reduce((s, c) => s + c.rejected_kg, 0))} kg
+            </strong>
+          </p>
           {data.classifications
             .filter((c) =>
               producerReceptions.some((r) => r.id === c.reception_id),
