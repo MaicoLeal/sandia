@@ -23,7 +23,7 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import type { AuditLog, Data, Pallet, Reception, Role, Table } from "./types";
+import type { AuditLog, Data, Pallet, Reception, Table } from "./types";
 import {
   assertClassification,
   assertPallet,
@@ -35,6 +35,7 @@ import {
   day,
   kg,
   now,
+  LOCAL_KEY,
   origin,
   parseKg,
   receptionTotal,
@@ -79,14 +80,6 @@ const nav = [
   { name: "Expedición", icon: Truck },
   { name: "Informes", icon: FileText },
 ] as const;
-const roleNames: Record<Role, string> = {
-  administrador: "Administrador",
-  recepcion: "Recepción",
-  pesaje: "Pesaje",
-  packing: "Packing",
-  gestor: "Gestor",
-  auditor: "Auditor / consulta",
-};
 const reasons = [
   "Fruta dañada",
   "Tamaño fuera del estándar",
@@ -119,14 +112,14 @@ function PublicTrace() {
   useEffect(() => {
     const token = new URLSearchParams(location.search).get("trace") ?? "";
     const lookup = async () => {
-      const local = await readWorkspace("demo");
+      const local = await readWorkspace(LOCAL_KEY);
       const p = local?.data.pallets.find(
         (p) => p.token === token && p.status !== "Cancelado",
       );
       if (p)
         return {
           code: p.code,
-          product: "Sandía · demostración local",
+          product: "Sandía",
           net_kg: p.net_kg,
           destination: p.destination,
           status: p.status,
@@ -168,18 +161,8 @@ export default function App() {
   );
 }
 function WorkspaceApp() {
-  const {
-    workspace,
-    error,
-    setError,
-    busy,
-    online,
-    commit,
-    sync,
-    role,
-    demoRole,
-    setDemoRole,
-  } = useWorkspace();
+  const { workspace, error, setError, busy, online, commit, sync, role } =
+    useWorkspace();
   const [page, setPage] = useState<Page>("Inicio");
   const [dialog, setDialog] = useState<Dialog>(null);
   const [returnToReception, setReturnToReception] = useState(false);
@@ -210,8 +193,8 @@ function WorkspaceApp() {
   const data = workspace.data;
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
-  const actor = workspace.profile?.name ?? roleNames[role] + " · demo";
-  const draftKey = org + ":" + (user ?? "demo") + ":reception";
+  const actor = workspace.profile?.name ?? "Operador local";
+  const draftKey = org + ":" + (user ?? "local") + ":reception";
   const record = (
     d: Data,
     table: Table,
@@ -272,10 +255,12 @@ function WorkspaceApp() {
     .filter((c) => c.status !== "Cancelado")
     .reduce((s, c) => s + c.rejected_kg, 0);
   const qualities = data.classifications.filter(
-    (c) => c.status !== "Cancelado",
+    (c) => c.status !== "Cancelado" && c.quality !== null,
   );
   const quality = qualities.length
-    ? round(qualities.reduce((s, c) => s + c.quality, 0) / qualities.length)
+    ? round(
+        qualities.reduce((s, c) => s + (c.quality ?? 0), 0) / qualities.length,
+      )
     : null;
   const newButton = (
     title: string,
@@ -529,8 +514,8 @@ function WorkspaceApp() {
             <span className={"connection " + (!online ? "offline" : "")}>
               {online ? <Cloud size={15} /> : <WifiOff size={15} />}
               <span>
-                {workspace.demo
-                  ? "Demostración local"
+                {workspace.localOnly
+                  ? "Datos reales · local"
                   : workspace.pending
                     ? "Pendiente de sincronizar"
                     : "Sincronizado"}
@@ -546,19 +531,19 @@ function WorkspaceApp() {
           </div>
         </header>
         <main>
-          <div className="demo-banner">
+          <div className="workspace-banner">
             <span>
               <Leaf size={16} />
-              {workspace.demo
-                ? "Espacio de demostración · datos ficticios guardados en este dispositivo"
+              {workspace.localOnly
+                ? "Datos reales en este dispositivo · sin sincronizar con Supabase"
                 : "Espacio de trabajo · " + actor}
             </span>
-            {!workspace.demo && (
+            {!workspace.localOnly && (
               <button onClick={() => void sync()} disabled={busy || !online}>
                 {busy ? "Sincronizando…" : "Sincronizar"}
               </button>
             )}
-            {workspace.demo && (
+            {workspace.localOnly && (
               <button onClick={() => setDialog("settings")}>
                 Conectar Supabase <ArrowRight size={14} />
               </button>
@@ -793,9 +778,7 @@ function WorkspaceApp() {
                   <div className="quality">
                     <span>Calidad visual media</span>
                     <strong>
-                      {quality === null
-                        ? "Sin clasificar"
-                        : kg(quality) + " / 5"}
+                      {quality === null ? "Sin evaluar" : kg(quality) + " / 5"}
                     </strong>
                     <small>
                       {kg(rejects)} kg rechazados · {kg(total)} kg recibidos
@@ -923,8 +906,14 @@ function WorkspaceApp() {
                           Destino: <strong>{p.destination}</strong>
                         </p>
                         <p className="hint">
-                          Bruto: {kg(p.gross_kg)} kg · Tara:{" "}
-                          {kg(p.gross_kg - p.net_kg)} kg
+                          Bruto:{" "}
+                          {p.gross_kg === null
+                            ? "Sin informar"
+                            : kg(p.gross_kg) + " kg"}{" "}
+                          · Tara:{" "}
+                          {p.gross_kg === null
+                            ? "Sin tara registrada"
+                            : kg(p.gross_kg - p.net_kg) + " kg"}
                         </p>
                         <div className="row">
                           <button
@@ -1075,8 +1064,8 @@ function WorkspaceApp() {
           {page === "Informes" && <Reports data={data} onError={setError} />}
           <footer>
             Peso siempre en kg · Fechas del Paraguay ·{" "}
-            {workspace.demo
-              ? "Demostración local"
+            {workspace.localOnly
+              ? "Datos reales · local"
               : "Organización protegida por acceso autenticado"}
           </footer>
         </main>
@@ -1316,20 +1305,46 @@ function WorkspaceApp() {
                   allowed("receive");
                   await commit((d) => {
                     const plot = d.plots.find((p) => p.id === values.plotId);
-                    if (!plot) throw new Error("Seleccione una parcela.");
+                    const selected = d.producers.find(
+                      (p) =>
+                        p.id === values.producerId && p.status === "Activo",
+                    );
+                    if (!selected)
+                      throw new Error("Seleccione un productor activo.");
+                    if (values.plotId && !plot)
+                      throw new Error("Seleccione una parcela válida.");
+                    if (
+                      plot &&
+                      d.farms.find((f) => f.id === plot.farm_id)
+                        ?.producer_id !== selected.id
+                    )
+                      throw new Error("La parcela pertenece a otro productor.");
                     let lot = d.field_lots.find((l) => l.id === values.lotId);
-                    if (lot && lot.plot_id !== plot.id)
-                      throw new Error("El lote pertenece a otra parcela.");
+                    if (
+                      lot &&
+                      ((lot.plot_id !== null &&
+                        lot.plot_id !== values.plotId) ||
+                        (lot.producer_id && lot.producer_id !== selected.id))
+                    )
+                      throw new Error("El lote pertenece a otro origen.");
                     if (lot && ["Expedido", "Rechazado"].includes(lot.status))
                       throw new Error("El lote está cerrado.");
                     if (!lot) {
+                      if (
+                        values.lotCode.trim() &&
+                        d.field_lots.some(
+                          (l) => l.code === values.lotCode.trim(),
+                        )
+                      )
+                        throw new Error("Ya existe un lote con este código.");
                       lot = {
                         ...base(org, "En recepción", user),
-                        plot_id: plot.id,
-                        code: code("SAN"),
+                        plot_id: plot?.id ?? null,
+                        producer_id: selected.id,
+                        code: values.lotCode.trim() || code("SAN"),
                         crop: "Sandía",
-                        variety: plot.variety,
-                        harvest_date: values.harvest,
+                        variety: plot?.variety ?? "",
+                        harvest_date: values.harvest || null,
                         notes: "",
                       };
                       d.field_lots.push(lot);
@@ -1484,7 +1499,7 @@ function WorkspaceApp() {
                       rejected_count: optionalNumber(form, "rejected_count"),
                       reason: text(form, "reason"),
                       size: text(form, "size"),
-                      quality: number(form, "quality"),
+                      quality: optionalNumber(form, "quality"),
                       notes: text(form, "notes"),
                     };
                     d.classifications.push(c);
@@ -1574,7 +1589,8 @@ function WorkspaceApp() {
                 <input name="size" />
               </Field>
               <Field label="Calidad visual (1 a 5)">
-                <select name="quality" defaultValue="4">
+                <select name="quality" defaultValue="">
+                  <option value="">Sin evaluar</option>
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
                       {n} / 5
@@ -1599,7 +1615,7 @@ function WorkspaceApp() {
                   allowed("pallet");
                   const id = text(form, "reception");
                   const net = number(form, "net");
-                  const gross = number(form, "gross");
+                  const gross = optionalNumber(form, "gross");
                   const count = number(form, "count");
                   if (!Number.isInteger(count) || count < 1 || count > 100)
                     throw new Error("Use entre 1 y 100 pallets.");
@@ -1608,7 +1624,7 @@ function WorkspaceApp() {
                       d,
                       id,
                       round(net * count),
-                      round(gross * count),
+                      gross === null ? null : round(gross * count),
                     );
                     for (let i = 0; i < count; i++) {
                       const p = {
@@ -1650,11 +1666,11 @@ function WorkspaceApp() {
                 void run(
                   async () => {
                     allowed("ship");
-                    if (!workspace.demo && !online)
+                    if (!workspace.localOnly && !online)
                       throw new Error(
                         "La expedición requiere conexión para validar la disponibilidad.",
                       );
-                    if (!workspace.demo && workspace.pending)
+                    if (!workspace.localOnly && workspace.pending)
                       throw new Error(
                         "Sincronice los pallets listos antes de registrar una expedición.",
                       );
@@ -1728,8 +1744,8 @@ function WorkspaceApp() {
                       );
                     });
                   },
-                  workspace.demo
-                    ? "Expedición de demostración guardada."
+                  workspace.localOnly
+                    ? "Expedición guardada en este dispositivo."
                     : "Expedición guardada localmente. Compruebe la sincronización antes de liberar la carga.",
                 );
               }}
@@ -1810,29 +1826,15 @@ function WorkspaceApp() {
                 Descargar respaldo local
               </button>
               <p className="hint">
-                La demostración trabaja en este dispositivo. Con Supabase se
-                utiliza el perfil asignado en el servidor.
+                Sin una cuenta, los datos se guardan solo en este dispositivo.
+                Con Supabase se utiliza el perfil asignado en el servidor.
               </p>
-              {workspace.demo && (
-                <Field label="Perfil de demostración">
-                  <select
-                    value={demoRole}
-                    onChange={(e) => setDemoRole(e.target.value as Role)}
-                  >
-                    {Object.entries(roleNames).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
               <div className="setting-info">
                 <CloudOff />
                 <div>
                   <strong>{online ? "Con conexión" : "Sin conexión"}</strong>
                   <p>
-                    {workspace.demo
+                    {workspace.localOnly
                       ? "Datos guardados localmente en IndexedDB."
                       : "Los cambios locales requieren sincronización."}
                   </p>
@@ -1844,7 +1846,7 @@ function WorkspaceApp() {
                   VITE_SUPABASE_ANON_KEY en .env.local y aplique la migración
                   incluida. Nunca coloque una service_role en el navegador.
                 </p>
-              ) : workspace.demo ? (
+              ) : workspace.localOnly ? (
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -1908,7 +1910,7 @@ function WorkspaceApp() {
             pallet={label}
             onPrinted={async () => {
               allowed("pallet");
-              if (!workspace.demo && workspace.pending)
+              if (!workspace.localOnly && workspace.pending)
                 throw new Error(
                   "Sincronice antes de imprimir los códigos definitivos de lote y pallet.",
                 );
@@ -1939,7 +1941,9 @@ function WorkspaceApp() {
             <Badge>{detail.lot?.status}</Badge>
             <h2>{detail.producer?.name}</h2>
             <p>
-              {detail.farm?.name} · {detail.plot?.name}
+              {detail.plot
+                ? detail.farm?.name + " · " + detail.plot.name
+                : "Parcela pendiente de informar"}
             </p>
             <strong className="big-number">
               {kg(receptionTotal(data, detail.reception.id))}{" "}
@@ -1950,6 +1954,9 @@ function WorkspaceApp() {
               {detail.reception.responsible}
             </p>
           </div>
+          {detail.reception.notes && (
+            <p className="hint">{detail.reception.notes}</p>
+          )}
           <div className="row">
             {newButton("Pesaje", "weight", "weigh", <Scale size={16} />)}
             {!data.classifications.some(
@@ -1957,6 +1964,62 @@ function WorkspaceApp() {
             ) && newButton("Clasificar", "classification", "classify")}
             {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
           </div>
+          {can(role, "correct") &&
+            detail.reception.status !== "Cancelado" &&
+            !data.classifications.some(
+              (c) => c.reception_id === detail.reception?.id,
+            ) && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const value = text(form, "corrected_date");
+                  const reason = text(form, "date_reason");
+                  void run(async () => {
+                    allowed("correct");
+                    if (!reason) throw new Error("Indique la justificación.");
+                    if (
+                      !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+                      Number.isNaN(Date.parse(value)) ||
+                      new Date(value).toISOString().slice(0, 10) !== value
+                    )
+                      throw new Error("Fecha inválida. Use AAAA-MM-DD.");
+                    await commit((d) => {
+                      const r = d.receptions.find(
+                        (r) => r.id === detail.reception!.id,
+                      )!;
+                      const before = structuredClone(r);
+                      r.date = value;
+                      r.updated_at = now();
+                      record(
+                        d,
+                        "receptions",
+                        r.id,
+                        "Recepción corregida",
+                        before,
+                        r,
+                        reason,
+                      );
+                    });
+                  });
+                }}
+              >
+                <Field label="Fecha correcta (AAAA-MM-DD)">
+                  <input
+                    name="corrected_date"
+                    required
+                    defaultValue={detail.reception.date}
+                    pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}"
+                  />
+                </Field>
+                <Field label="Justificación de la fecha">
+                  <input name="date_reason" required />
+                </Field>
+                <Submit disabled={busy}>
+                  Corregir fecha con justificación
+                </Submit>
+              </form>
+            )}
           {can(role, "correct") &&
             detail.reception.status !== "Cancelado" &&
             !data.classifications.some(
@@ -2075,7 +2138,9 @@ function WorkspaceApp() {
                   <strong>{kg(c.rejected_kg)} kg</strong>
                 </p>
                 <p>
-                  Calidad: {c.quality}/5 · {c.reason || "Sin rechazo"}
+                  Calidad:{" "}
+                  {c.quality === null ? "Sin evaluar" : c.quality + "/5"} ·{" "}
+                  {c.reason || "Sin rechazo"}
                 </p>
                 <p>
                   Saldo disponible:{" "}
@@ -2236,12 +2301,12 @@ function WorkspaceApp() {
           <p>
             Calidad media:{" "}
             <strong>
-              {producerQuality.length
+              {producerQuality.some((c) => c.quality !== null)
                 ? kg(
-                    producerQuality.reduce((s, c) => s + c.quality, 0) /
-                      producerQuality.length,
+                    producerQuality.reduce((s, c) => s + (c.quality ?? 0), 0) /
+                      producerQuality.filter((c) => c.quality !== null).length,
                   ) + " / 5"
-                : "Sin clasificar"}
+                : "Sin evaluar"}
             </strong>{" "}
             · Rechazos:{" "}
             <strong>
@@ -2254,7 +2319,8 @@ function WorkspaceApp() {
             )
             .map((c) => (
               <p key={c.id}>
-                Calidad {c.quality}/5 · {kg(c.rejected_kg)} kg rechazados ·{" "}
+                Calidad {c.quality === null ? "Sin evaluar" : c.quality + "/5"}{" "}
+                · {kg(c.rejected_kg)} kg rechazados ·{" "}
                 {c.reason || "Sin rechazo"}
               </p>
             ))}
@@ -2319,6 +2385,7 @@ interface ReceptionValues {
   producerId: string;
   plotId: string;
   lotId: string;
+  lotCode: string;
   date: string;
   harvest: string;
   responsible: string;
@@ -2344,8 +2411,9 @@ function ReceptionForm({
     producerId: "",
     plotId: "",
     lotId: "",
+    lotCode: "",
     date: day(),
-    harvest: day(),
+    harvest: "",
     responsible: actor,
     notes: "",
     weights: [],
@@ -2359,7 +2427,7 @@ function ReceptionForm({
     void readDraft<ReceptionValues>(draftKey)
       .then((draft) => {
         if (active) {
-          if (draft) setValues(draft);
+          if (draft) setValues((initial) => ({ ...initial, ...draft }));
           setReady(true);
         }
       })
@@ -2463,15 +2531,14 @@ function ReceptionForm({
           Nueva parcela
         </button>
       </div>
-      <Field label="Parcela *">
+      <Field label="Parcela (si se conoce)">
         <select
-          required
           value={values.plotId}
           onChange={(e) =>
             setValues((v) => ({ ...v, plotId: e.target.value, lotId: "" }))
           }
         >
-          <option value="">Seleccione una parcela</option>
+          <option value="">Parcela pendiente de informar</option>
           {data.plots
             .filter(
               (p) =>
@@ -2494,7 +2561,9 @@ function ReceptionForm({
           {data.field_lots
             .filter(
               (l) =>
-                l.plot_id === values.plotId &&
+                (values.plotId
+                  ? l.plot_id === values.plotId
+                  : l.producer_id === values.producerId) &&
                 !["Expedido", "Rechazado"].includes(l.status),
             )
             .map((l) => (
@@ -2504,6 +2573,16 @@ function ReceptionForm({
             ))}
         </select>
       </Field>
+      {!values.lotId && (
+        <Field label="Código / nombre del lote">
+          <input
+            maxLength={80}
+            value={values.lotCode}
+            onChange={(e) => set("lotCode", e.target.value)}
+            placeholder="Automático si se deja vacío"
+          />
+        </Field>
+      )}
       <div className="form-grid">
         <Field label="Fecha de recepción *">
           <input
@@ -2513,10 +2592,9 @@ function ReceptionForm({
             onChange={(e) => set("date", e.target.value)}
           />
         </Field>
-        <Field label="Fecha de cosecha *">
+        <Field label="Fecha de cosecha (si se conoce)">
           <input
             type="date"
-            required
             value={values.harvest}
             onChange={(e) => set("harvest", e.target.value)}
           />
@@ -2661,8 +2739,8 @@ function PalletForm({
         <Field label="Peso neto por pallet (kg) *">
           <input name="net" inputMode="decimal" required />
         </Field>
-        <Field label="Peso bruto por pallet (kg) *">
-          <input name="gross" inputMode="decimal" required />
+        <Field label="Peso bruto por pallet (kg), si se conoce">
+          <input name="gross" inputMode="decimal" />
         </Field>
       </div>
       <Field label="Cantidad de frutas por pallet">
@@ -2724,7 +2802,7 @@ function Reports({
           Productor: o.producer?.name ?? "",
           Destino: p.destination,
           Neto_kg: p.net_kg,
-          Bruto_kg: p.gross_kg,
+          Bruto_kg: p.gross_kg ?? "Sin informar",
           Estado: p.status,
         };
       });
@@ -2779,7 +2857,7 @@ function Reports({
           Lote: o.lot?.code ?? "",
           Rechazado_kg: c.rejected_kg,
           Motivo: c.reason,
-          Calidad: c.quality,
+          Calidad: c.quality ?? "Sin evaluar",
         };
       });
   report = report.filter((r) =>

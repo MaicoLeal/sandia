@@ -1,3 +1,4 @@
+import { seed } from "./test-fixtures";
 import { describe, it, expect } from "vitest";
 import {
   assertClassification,
@@ -9,10 +10,15 @@ import {
   origin,
   parseKg,
   receptionTotal,
-  seed,
+  emptyData,
   summary,
 } from "./domain";
 describe("recepción y trazabilidad", () => {
+  it("abre el sistema sin registros de demostración", () => {
+    expect(Object.values(emptyData()).every((rows) => rows.length === 0)).toBe(
+      true,
+    );
+  });
   it("confirma los nueve pesos solicitados", () => {
     const d = seed();
     const s = summary(d.reception_weights.map((w) => w.kg));

@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Data, Role, Workspace } from "./types";
-import { DEMO_ORG, seed } from "./domain";
-import { readWorkspace, saveWorkspace } from "./services/storage";
+import type { Data, Workspace } from "./types";
+import { LOCAL_ORG, LOCAL_KEY, emptyData } from "./domain";
+import {
+  readWorkspace,
+  saveWorkspace,
+  removeLegacyDemo,
+} from "./services/storage";
 import { loadRemote, supabase, syncRemote } from "./services/supabase";
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
-  const [demoRole, setDemoRole] = useState<Role>("administrador");
   const lock = useRef(false);
   const load = useCallback(async () => {
     try {
+      await removeLegacyDemo();
       const session = supabase ? await supabase.auth.getSession() : null;
       if (session?.data.session) {
         const key = "cloud:" + session.data.session.user.id;
@@ -29,16 +33,16 @@ export function useWorkspace() {
         await saveWorkspace(key, remote);
         setWorkspace(remote);
       } else {
-        const cached = await readWorkspace("demo");
+        const cached = await readWorkspace(LOCAL_KEY);
         const initial = cached ?? {
-          data: seed(),
+          data: emptyData(),
           revision: 0,
           pending: false,
-          demo: true,
-          organizationId: DEMO_ORG,
+          localOnly: true,
+          organizationId: LOCAL_ORG,
           profile: null,
         };
-        await saveWorkspace("demo", initial);
+        await saveWorkspace(LOCAL_KEY, initial);
         setWorkspace(initial);
       }
     } catch (e) {
@@ -76,8 +80,8 @@ export function useWorkspace() {
     try {
       const copy = structuredClone(workspace);
       update(copy.data);
-      copy.pending = !copy.demo;
-      const key = copy.demo ? "demo" : "cloud:" + copy.profile?.user_id;
+      copy.pending = !copy.localOnly;
+      const key = copy.localOnly ? LOCAL_KEY : "cloud:" + copy.profile?.user_id;
       await saveWorkspace(key, copy);
       setWorkspace(copy);
     } finally {
@@ -122,7 +126,7 @@ export function useWorkspace() {
   useEffect(() => {
     if (
       !workspace ||
-      workspace.demo ||
+      workspace.localOnly ||
       !online ||
       (!workspace.pending && !workspace.needsRefresh)
     )
@@ -138,8 +142,8 @@ export function useWorkspace() {
     online,
     commit,
     sync,
-    role: workspace?.demo ? demoRole : (workspace?.profile?.role ?? "auditor"),
-    demoRole,
-    setDemoRole,
+    role: workspace?.localOnly
+      ? ("administrador" as const)
+      : (workspace?.profile?.role ?? "auditor"),
   };
 }

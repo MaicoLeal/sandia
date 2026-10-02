@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { base, seed } from "./domain";
+import { base } from "./domain";
+import { seed } from "./test-fixtures";
 import type { Data } from "./types";
 const user = "30000000-0000-4000-8000-000000000001";
 const org = "10000000-0000-4000-8000-000000000001";
@@ -29,6 +30,24 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610020003_real_intake.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/202610020004_reception_date_correction.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await db.query(`insert into auth.users values($1);`, [user]);
   await db.query(
     `insert into organizations(id,name) values($1,'Test Agronorte');`,
@@ -40,6 +59,10 @@ beforeAll(async () => {
   );
   await db.query(`select set_config('request.jwt.claim.sub',$1,false)`, [user]);
   snapshot = seed();
+  snapshot.field_lots[0].code = "01102026";
+  snapshot.field_lots[0].harvest_date = null;
+  snapshot.field_lots[0].plot_id = null;
+  snapshot.field_lots[0].producer_id = snapshot.producers[0].id;
   for (const table of Object.values(snapshot))
     for (const row of table) {
       row.created_by = user;
@@ -55,8 +78,10 @@ async function sync(data: Data, revision: number) {
 async function remote() {
   const d = {} as Data;
   for (const table of Object.keys(snapshot) as (keyof Data)[]) {
-    const result = await db.query("select * from public." + table);
-    (d[table] as unknown[]) = result.rows;
+    const result = await db.query<{ row_value: unknown }>(
+      "select to_jsonb(x) as row_value from public." + table + " x",
+    );
+    (d[table] as unknown[]) = result.rows.map((row) => row.row_value);
   }
   return d;
 }
@@ -70,7 +95,47 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
     );
     expect(audit.rows[0].count).toBeGreaterThan(10);
     snapshot = await remote();
-    expect(snapshot.field_lots[0].code).toMatch(/^SAN-/);
+    expect(snapshot.field_lots[0].code).toBe("01102026");
+    expect(snapshot.field_lots[0].harvest_date).toBeNull();
+    expect(snapshot.field_lots[0].plot_id).toBeNull();
+    expect(snapshot.field_lots[0].producer_id).toBe(snapshot.producers[0].id);
+  });
+  it("exige justificación para corregir una fecha sin cambiar el origen", async () => {
+    const bad = structuredClone(snapshot);
+    bad.receptions[0].date = "2026-10-02";
+    await expect(sync(bad, 1)).rejects.toThrow("justificación");
+  });
+  it("corrige la fecha con auditoría y conserva el origen", async () => {
+    const corrected = structuredClone(snapshot);
+    const r = corrected.receptions[0];
+    const before = structuredClone(r);
+    r.date = "2026-10-02";
+    corrected.audit_logs.push({
+      ...base(org),
+      entity_type: "receptions",
+      entity_id: r.id,
+      action: "Recepción corregida",
+      actor: "Admin prueba",
+      before,
+      after: r,
+      reason: "Fecha confirmada por el responsable",
+    });
+    await db.exec("begin");
+    try {
+      await sync(corrected, 1);
+      const records = await db.query<{ date: string }>(
+        "select date::text as date from receptions where id=$1",
+        [r.id],
+      );
+      expect(records.rows[0].date).toBe("2026-10-02");
+      const logs = await db.query<{ reason: string }>(
+        "select reason from audit_logs where entity_id=$1 and reason=$2",
+        [r.id, "Fecha confirmada por el responsable"],
+      );
+      expect(logs.rows).toHaveLength(1);
+    } finally {
+      await db.exec("rollback");
+    }
   });
   it("bloquea una revisión obsoleta sin modificar datos", async () => {
     await expect(sync(snapshot, 0)).rejects.toThrow("Conflicto");
@@ -121,7 +186,7 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
       rejected_count: null,
       reason: "Fruta dañada",
       size: "",
-      quality: 4,
+      quality: null,
       notes: "",
     });
     await sync(next, 2);

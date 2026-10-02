@@ -1,20 +1,19 @@
 # Estado da entrega — 02/10/2026
 
-- Aplicação local implementada em React, TypeScript, Vite e Tailwind.
-- Supabase configurado em `.env.local` (fora do Git).
-- Migração aplicada no SQL Editor do projeto `znbtwkhktlldzhkiwodu`, após confirmar que o esquema public estava vazio.
-- Organização Cooperativa Agronorte criada com UUID `20000000-0000-4000-8000-000000000001`.
-- Primeiro usuário Auth e respectivo perfil administrador: adiado por decisão do proprietário.
-- Dados de Elias Galeano são fictícios e permanecem locais; não foram inseridos em produção.
-- Conferido na interface: classificação 3.000 kg aprovados / 247 kg rejeitados; três pallets de 1.000 kg; expedição fictícia de 3.000 kg para Uruguay.
-- Conferido em viewport de 390 × 844: navegação inferior e ausência de rolagem horizontal na tela inicial.
+- Aplicação implementada em React, TypeScript, Vite e Tailwind.
+- Supabase configurado em `.env.local`, fora do Git; organização Cooperativa Agronorte criada.
+- Quatro migrações aplicadas no Supabase: esquema inicial, motivos de correção, recepção com campos ainda não informados e correção auditada de data.
+- Primeiro usuário Auth e perfil administrador: adiado por decisão do proprietário.
+- Demonstração removida da aplicação; a inicialização abre um espaço vazio. Atualizações removem somente o antigo espaço demo, seus rascunhos e anexos; dados reais e espaços autenticados são preservados.
+- O aplicativo sem login guarda registros reais somente no dispositivo, com aviso explícito. Não há transferência automática desse espaço para uma conta autenticada.
+- Nomes operacionais de lotes são preservados; parcela, colheita, qualidade e peso bruto podem ficar pendentes sem valores presumidos.
+- Correções de data exigem gestor/administrador, justificativa e auditoria, antes da classificação.
 - Logotipo oficial confirmado no Drive e aplicado sem redesenhar o símbolo.
-- Testes de domínio e PostgreSQL local cobrem pesos, saldo, correções, auditoria, RLS, token QR, conflito de revisão, expedição e cancelamento.
+- Navegação mobile já conferida em viewport 390 × 844; rascunhos locais e abertura da PWA compilada após desligar o servidor de prévia verificados.
+- Fixtures de teste permanecem isoladas e não são carregadas no aplicativo.
 
-Ainda precisam de homologação com uma conta real: login Auth, upload/download de Storage, sincronização entre dispositivos e leitura do QR em URL HTTPS publicada. PWA pronta para publicação; APK e integrações de hardware não foram gerados.
+Validação desta atualização: lint sem erros, 19 testes aprovados e build de produção concluído com service worker. Os testes PostgreSQL cobrem RLS, revisão, peso, saldo, auditoria, cancelamento, origem e correção de data.
 
-Validação final: 16 testes passaram, lint sem erros, build de produção com service worker gerado. As duas migrações foram aplicadas no Supabase real. O primeiro usuário foi adiado por decisão do proprietário. Auditoria npm do lockfile: zero vulnerabilidades reportadas.
+Ainda precisam de homologação com uma conta real: login Auth, Storage, sincronização entre dispositivos e leitura do QR em URL HTTPS publicada. APK e integrações de hardware não foram gerados.
 
-Verificado: a PWA compilada reabriu e navegou após desligar o servidor de prévia; o rascunho de recepção foi preservado localmente. A sincronização real ainda depende de uma conta Auth.
-
-GitHub: após confirmação de propriedade e autorização explícita do proprietário, a implementação foi enviada para MaicoLeal/sandia, na branch codex/recepcion-sandia. Credenciais, arquivos .env e dados locais foram excluídos do envio.
+Código e documentação enviados ao repositório autorizado MaicoLeal/sandia, branch codex/recepcion-sandia. Credenciais, arquivos .env, registros reais e respaldos locais não fazem parte do envio.

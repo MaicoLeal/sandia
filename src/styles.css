@@ -236,7 +236,7 @@ main {
   margin: auto;
   padding: 24px 38px 32px;
 }
-.demo-banner {
+.workspace-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -249,13 +249,13 @@ main {
   margin-bottom: 28px;
   gap: 12px;
 }
-.demo-banner span,
-.demo-banner button {
+.workspace-banner span,
+.workspace-banner button {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.demo-banner button {
+.workspace-banner button {
   font-weight: 600;
   font-size: 11px;
 }
@@ -1310,20 +1310,20 @@ th {
   main {
     padding: 18px 18px 100px;
   }
-  .demo-banner {
+  .workspace-banner {
     font-size: 10px;
     margin-bottom: 22px;
     align-items: flex-start;
     padding: 9px 11px;
   }
-  .demo-banner button {
+  .workspace-banner button {
     font-size: 10px;
   }
-  .demo-banner span {
+  .workspace-banner span {
     gap: 6px;
     line-height: 1.6;
   }
-  .demo-banner button {
+  .workspace-banner button {
     white-space: nowrap;
   }
   .page-heading {

@@ -72,14 +72,14 @@ export async function loadRemote(): Promise<Workspace> {
     data: Object.fromEntries(results) as unknown as Data,
     revision: organization.revision,
     pending: false,
-    demo: false,
+    localOnly: false,
     organizationId: profile.organization_id,
     profile,
   };
 }
 export async function syncRemote(workspace: Workspace) {
-  if (!supabase || workspace.demo)
-    throw new Error("La demostración no se sincroniza con producción.");
+  if (!supabase || workspace.localOnly)
+    throw new Error("Inicie sesión para sincronizar los datos con Supabase.");
   for (const attachment of workspace.data.attachments) {
     const file = await getFile(attachment.id);
     if (file) {

@@ -33,11 +33,12 @@ export interface Plot extends Base {
   notes: string;
 }
 export interface FieldLot extends Base {
-  plot_id: string;
+  plot_id: string | null;
+  producer_id?: string | null;
   code: string;
   crop: string;
   variety: string;
-  harvest_date: string;
+  harvest_date: string | null;
   notes: string;
 }
 export interface Reception extends Base {
@@ -62,7 +63,7 @@ export interface Classification extends Base {
   rejected_count: number | null;
   reason: string;
   size: string;
-  quality: number;
+  quality: number | null;
   notes: string;
 }
 export interface Pallet extends Base {
@@ -71,7 +72,7 @@ export interface Pallet extends Base {
   destination: string;
   assembled_at: string;
   responsible: string;
-  gross_kg: number;
+  gross_kg: number | null;
   net_kg: number;
   fruit_count: number | null;
   notes: string;
@@ -139,7 +140,7 @@ export interface Workspace {
   data: Data;
   revision: number;
   pending: boolean;
-  demo: boolean;
+  localOnly: boolean;
   organizationId: string;
   profile: Profile | null;
 }

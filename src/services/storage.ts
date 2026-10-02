@@ -30,3 +30,25 @@ export async function readDraft<T>(key: string): Promise<T | undefined> {
 export async function clearDraft(key: string) {
   await (await db).delete("drafts", key);
 }
+
+// Delete only the legacy demonstration, never authenticated or real local workspaces.
+export async function removeLegacyDemo() {
+  const database = await db;
+  const legacy = (await database.get("workspace", "demo")) as
+    Workspace | undefined;
+  const tx = database.transaction(
+    ["workspace", "files", "drafts"],
+    "readwrite",
+  );
+  await tx.objectStore("workspace").delete("demo");
+  for (const attachment of legacy?.data.attachments ?? []) {
+    await tx.objectStore("files").delete(attachment.id);
+  }
+  const drafts = tx.objectStore("drafts");
+  for (const key of await drafts.getAllKeys()) {
+    if (String(key).startsWith("10000000-0000-4000-8000-000000000001:demo:")) {
+      await drafts.delete(key);
+    }
+  }
+  await tx.done;
+}

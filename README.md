@@ -41,16 +41,19 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 ## Fluxo de uso
 
 - Cadastre produtor e propriedade/parcela, ou use os atalhos dentro da recepção.
-- Nueva recepción: escolha produtor e parcela, crie ou selecione lote, informe datas/responsável e adicione pesos. O resumo calcula total, contagem, média, mínimo e máximo.
+- Nueva recepción: escolha produtor e a parcela, quando conhecida, crie ou selecione lote, informe datas/responsável e adicione pesos. O resumo calcula total, contagem, média, mínimo e máximo.
+- Parcela, data de colheita, peso bruto e nota de qualidade visual podem ficar sem informação; o sistema não atribui valores fictícios.
 - A seleção divide o recebido em aprovado/rejeitado, ambos em kg. Quantidade de frutas é opcional e não interfere no saldo em kg.
-- Crie um ou vários pallets iguais por operação, informando neto/bruto. O sistema verifica o saldo aprovado antes de alocar.
+- Crie um ou vários pallets iguais por operação, informando o peso líquido; bruto/tara podem ficar pendentes. O sistema verifica o saldo aprovado antes de alocar.
 - Consulte/imprima a etiqueta e marque o pallet listo para carga.
 - No modo conectado, sincronize os pallets antes de expedir. A expedição exige destino comum e pallets disponíveis; a transação no servidor impede dupla alocação e dupla expedição.
 - Informes inclui recepção, produtor, lote, pallet, rejeições, expedição e exportação. CSV abre no Excel; PDF é obtido com “Guardar como PDF” no diálogo de impressão.
 
-## Dados de demonstração
+## Dados reais e inicialização
 
-Elias Galeano é fictício. Recepção de 01/10/2026 com pesos 340, 410, 381, 395, 394, 389, 343, 397, 198 kg: **3.247 kg**, 9 pesagens, média 360,78 kg, mínimo 198 kg e máximo 410 kg. O exemplo inicial não contém classificação nem pallets, para permitir praticar o fluxo completo. Alterações de demonstração permanecem somente no dispositivo.
+O aplicativo abre vazio, sem dados fictícios. Ao atualizar uma instalação anterior, remove somente o antigo espaço `demo`, seus rascunhos e anexos locais. Espaços autenticados e o novo espaço local de dados reais são preservados. Exemplos continuam apenas nas fixtures dos testes e não são carregados pelo aplicativo.
+
+Sem login, os registros reais permanecem exclusivamente neste navegador/dispositivo, com aviso explícito. Baixe um respaldo local antes de limpar dados do navegador. Iniciar sessão abre um espaço separado da organização: esta versão não transfere automaticamente os registros locais para a conta. Essa transferência precisa de procedimento supervisionado, para evitar duplicação e perda de origem.
 
 ## Persistência e offline
 
@@ -64,7 +67,7 @@ No navegador, armazenamento local e sessão dependem do acesso ao dispositivo. S
 
 As tabelas utilizam UUID e organização; FKs compostas impedem ligar entidades de organizações diferentes. RLS permite leitura apenas da organização do perfil ativo. Escritas ocorrem pela RPC transacional, que valida perfil, revisão e integridade; clientes não recebem DELETE nem escrita direta.
 
-O banco gera os códigos finais, datas e auditoria. O operador vê um código provisório local até a sincronização. Auditoria preserva antes/depois e usuário. Correções de peso exigem gestor/administrador e motivo; uma recepção já classificada exige reversão supervisionada, ainda não disponível na interface. Cancelamento de recepção antes da classificação preserva as pesagens e registra justificativa. Pallets expedidos e vínculos operacionais não podem ser editados diretamente.
+O banco preserva o código/nome de lote informado (único por organização) e gera um código quando ele está vazio. Gera os códigos finais dos pallets, datas e auditoria. O operador vê um código provisório local até a sincronização. Auditoria preserva antes/depois e usuário. Correções de peso exigem gestor/administrador e motivo; uma recepção já classificada exige reversão supervisionada, ainda não disponível na interface. Correção de data antes da classificação exige justificativa e gera auditoria. Cancelamento de recepção antes da classificação preserva as pesagens e registra justificativa. Pallets expedidos e vínculos operacionais não podem ser editados diretamente.
 
 Anexos são privados (máximo 10 MB), com leitura autenticada e URLs assinadas. O QR usa token opaco e mostra somente código, produto, peso líquido, destino e status. A solicitação de impressão é auditada; o navegador não confirma que a impressora fisicamente imprimiu.
 

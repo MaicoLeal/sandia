@@ -151,7 +151,10 @@ export function Label({
           <p>
             <span>Peso neto / bruto</span>
             <strong>
-              {kg(pallet.net_kg)} / {kg(pallet.gross_kg)} kg
+              {kg(pallet.net_kg)} kg /{" "}
+              {pallet.gross_kg === null
+                ? "Sin informar"
+                : kg(pallet.gross_kg) + " kg"}
             </strong>
           </p>
           <p>
