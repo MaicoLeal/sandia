@@ -17,4 +17,4 @@ Validação final: 16 testes passaram, lint sem erros, build de produção com s
 
 Verificado: a PWA compilada reabriu e navegou após desligar o servidor de prévia; o rascunho de recepção foi preservado localmente. A sincronização real ainda depende de uma conta Auth.
 
-GitHub: implementação salva na branch local codex/recepcion-sandia. O envio remoto foi rejeitado pela revisão automática por falta de autorização explícita para publicar o código nesse destino. Nenhum push foi realizado.
+GitHub: após confirmação de propriedade e autorização explícita do proprietário, a implementação foi enviada para MaicoLeal/sandia, na branch codex/recepcion-sandia. Credenciais, arquivos .env e dados locais foram excluídos do envio.
