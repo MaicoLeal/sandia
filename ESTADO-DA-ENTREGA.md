@@ -17,6 +17,6 @@ Validação desta atualização: lint sem erros, 20 testes aprovados e build de 
 
 Ainda precisam de homologação com uma conta real: login Auth, Storage e sincronização entre dispositivos. APK e integrações de hardware não foram gerados.
 
-Publicação preparada via GitHub Actions/Pages em https://maicoleal.github.io/sandia/, com login obrigatório para operar. O QR público mantém cinco campos básicos; detalhes de origem exigem sessão da mesma organização.
+Aplicativo publicado e aberto com sucesso em https://maicoleal.github.io/sandia/, via GitHub Actions/Pages, com login obrigatório para operar. Workflow de build e deploy concluído com sucesso. Todos os tokens iniciais de QR foram consultados na API real, com códigos e pesos conferidos; uma página de consulta pública também foi validada no navegador. O QR público mantém cinco campos básicos; detalhes de origem exigem sessão da mesma organização.
 
 Código e documentação enviados ao repositório autorizado MaicoLeal/sandia, branch codex/recepcion-sandia. Credenciais, arquivos .env, registros reais e respaldos locais não fazem parte do envio.
