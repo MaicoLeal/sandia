@@ -1,9 +1,19 @@
 import { cloneElement, useEffect, useId, useState } from "react";
-import type { ReactElement, ReactNode, ComponentProps } from "react";
+import type {
+  ReactElement,
+  ReactNode,
+  ComponentProps,
+  CSSProperties,
+} from "react";
+import { flushSync } from "react-dom";
 import { X, Printer, Download, CheckCircle2, Leaf } from "lucide-react";
 import QRCode from "qrcode";
 import type { Data, Pallet } from "./types";
-import { dateLabel, kg, origin } from "./domain";
+import {
+  palletLabelData,
+  palletLabelDeclaration,
+  palletLabelRows,
+} from "./services/pallet-label-data";
 export function Brand() {
   return (
     <div className="brand">
@@ -115,6 +125,7 @@ export function Label({
   online = true,
   syncError = "",
   onSync,
+  onEditExport,
 }: {
   pallet: Pallet;
   data: Data;
@@ -124,83 +135,165 @@ export function Label({
   online?: boolean;
   syncError?: string;
   onSync?: () => Promise<void>;
+  onEditExport?: () => void;
 }) {
   const [qr, setQr] = useState("");
   const [error, setError] = useState("");
-  const item = data.pallet_items.find((x) => x.pallet_id === pallet.id);
-  const o = origin(data, item?.reception_id ?? "");
+  const [preparingPdf, setPreparingPdf] = useState(false);
+  const [printSizes, setPrintSizes] = useState<number[]>([]);
+  const label = palletLabelData(data, pallet);
   const publicBase =
     import.meta.env.VITE_PUBLIC_TRACE_URL ||
     window.location.origin + window.location.pathname;
   const link = publicBase + "?trace=" + encodeURIComponent(pallet.token);
   useEffect(() => {
-    QRCode.toDataURL(link, { width: 250, margin: 2, errorCorrectionLevel: "M" })
-      .then(setQr)
-      .catch(() => setError("No se pudo generar el QR."));
+    let active = true;
+    setQr("");
+    QRCode.toDataURL(link, { width: 800, margin: 4, errorCorrectionLevel: "M" })
+      .then((value) => {
+        if (active) setQr(value);
+      })
+      .catch(() => {
+        if (active) setError("No se pudo generar el QR.");
+      });
+    return () => {
+      active = false;
+    };
   }, [link]);
   const print = async () => {
     setError("");
+    setPreparingPdf(true);
     try {
+      const { createPalletLabelPdf, loadLabelLogo, labelPrintFontSizes } =
+        await import("./services/pallet-label-pdf");
+      createPalletLabelPdf(label, { logo: await loadLabelLogo(), qr });
+      const sizes = labelPrintFontSizes(label);
       await onPrinted();
+      flushSync(() => setPrintSizes(sizes));
       window.print();
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "No se pudo registrar la impresión.",
       );
+    } finally {
+      setPreparingPdf(false);
+    }
+  };
+  const downloadPdf = async () => {
+    setError("");
+    setPreparingPdf(true);
+    try {
+      const { createPalletLabelPdf, loadLabelLogo } =
+        await import("./services/pallet-label-pdf");
+      const logo = await loadLabelLogo();
+      const pdf = createPalletLabelPdf(label, { logo, qr });
+      await onPrinted();
+      pdf.save(pallet.code + "-A4.pdf");
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "No se pudo descargar la etiqueta.",
+      );
+    } finally {
+      setPreparingPdf(false);
     }
   };
   return (
     <>
-      <div className="print-label">
-        <Brand />
-        <h2>Sandía</h2>
-        <p className="label-code">{pallet.code}</p>
-        <div className="label-details">
-          <p>
-            <span>Lote</span>
-            <strong>{o.lot?.code}</strong>
-          </p>
-          <p>
-            <span>Productor</span>
-            <strong>{o.producer?.name}</strong>
-          </p>
-          <p>
-            <span>Parcela / localidad</span>
-            <strong>
-              {o.plot?.name || o.producer?.community || "Pendiente de informar"}
-            </strong>
-          </p>
-          <p>
-            <span>Recepción</span>
-            <strong>{o.reception && dateLabel(o.reception.date)}</strong>
-          </p>
-          <p>
-            <span>Peso neto / bruto</span>
-            <strong>
-              {kg(pallet.net_kg)} kg /{" "}
-              {pallet.gross_kg === null
-                ? "Sin informar"
-                : kg(pallet.gross_kg) + " kg"}
-            </strong>
-          </p>
-          <p>
-            <span>Destino</span>
-            <strong>{pallet.destination}</strong>
-          </p>
-          <p>
-            <span>Responsable</span>
-            <strong>{pallet.responsible}</strong>
-          </p>
-        </div>
-        {qr && (
-          <img
-            width="180"
-            height="180"
-            src={qr}
-            alt="QR de trazabilidad del pallet"
-          />
+      <div className="row between no-print label-format-note">
+        <p className="hint">
+          A4 horizontal · 297 × 210 mm · Una etiqueta por hoja
+        </p>
+        {onEditExport && (
+          <button
+            className="button secondary"
+            disabled={busy || preparingPdf}
+            onClick={onEditExport}
+          >
+            Datos de la etiqueta
+          </button>
         )}
-        <small>Cooperativa Agronorte · Trazabilidad por pallet</small>
+      </div>
+      <div className="print-label export-label">
+        <header className="export-label-head">
+          <img
+            className="export-label-logo"
+            src={import.meta.env.BASE_URL + "agronorte-logo.png"}
+            alt="Cooperativa Agronorte"
+          />
+          <div className="export-label-context">
+            <span>
+              Productor: <strong>{label.producer}</strong>
+            </span>
+            <span>
+              Responsable: <strong>{label.responsible}</strong>
+            </span>
+          </div>
+        </header>
+        <div className="export-label-main">
+          <table className="export-label-fields">
+            <tbody>
+              {palletLabelRows(label).map((row, index) => (
+                <tr key={row.title}>
+                  <th scope="row">{row.title}</th>
+                  <td
+                    style={
+                      printSizes[index]
+                        ? ({
+                            "--label-print-size": `${printSizes[index]}pt`,
+                          } as CSSProperties)
+                        : undefined
+                    }
+                    className={
+                      row.title === "PESO NETO (kg)"
+                        ? "export-label-weight"
+                        : ""
+                    }
+                  >
+                    {row.scientific ? (
+                      <>
+                        <em>Citrullus lanatus</em> (sandía)
+                      </>
+                    ) : (
+                      row.value
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <aside className="export-label-trace">
+            <strong className="export-label-qr-title">TRAZABILIDAD</strong>
+            {qr && (
+              <img
+                className="export-label-qr"
+                width="180"
+                height="180"
+                src={qr}
+                alt="QR de trazabilidad del pallet"
+              />
+            )}
+            <strong className="export-label-code">{label.code}</strong>
+            <dl>
+              <dt>Lote</dt>
+              <dd>{label.lots}</dd>
+              <dt>Recepción</dt>
+              <dd>{label.reception}</dd>
+              <dt>Destino</dt>
+              <dd>{label.destination}</dd>
+            </dl>
+          </aside>
+        </div>
+        <footer className="export-label-declaration">
+          <p>{palletLabelDeclaration(label)}</p>
+          <strong>
+            {label.senaveProgram && (
+              <>
+                <em>Anastrepha grandis.</em>{" "}
+              </>
+            )}
+            LOTE N.º: {label.lots}
+          </strong>
+        </footer>
       </div>
       <p className="hint no-print">
         El QR abre la identificación, peso, destino y estado del pallet. Para
@@ -244,12 +337,20 @@ export function Label({
         <button
           className="button primary"
           onClick={() => void print()}
-          disabled={!qr || pending || busy}
+          disabled={!qr || pending || busy || preparingPdf}
         >
           <Printer size={18} />
-          Imprimir / PDF
+          Imprimir A4
         </button>
-        {qr && !pending && !busy && (
+        <button
+          className="button secondary"
+          disabled={!qr || pending || busy || preparingPdf}
+          onClick={() => void downloadPdf()}
+        >
+          <Download size={18} />
+          {preparingPdf ? "Preparando PDF…" : "Descargar PDF A4"}
+        </button>
+        {qr && !pending && !busy && !preparingPdf && (
           <a
             className="button secondary"
             download={pallet.code + "-qr.png"}

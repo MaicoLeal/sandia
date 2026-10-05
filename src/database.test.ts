@@ -76,6 +76,15 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/20261005225807_pallet_export_label.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await db.query(
     `insert into auth.users(id,email) values($1,'admin@test.invalid');`,
     [user],
@@ -547,6 +556,43 @@ describe.sequential("migración y reglas de PostgreSQL", () => {
     };
     await expect(sync(brokenChain, 9)).rejects.toThrow("secuencia válida");
   });
+  it("sincroniza código y origen del productor con justificación y no inventa datos en registros anteriores", async () => {
+    expect(snapshot.producers[0].metadata).toBeNull();
+    expect(snapshot.pallets[0].metadata).toBeNull();
+    const corrected = structuredClone(snapshot);
+    const before = structuredClone(corrected.producers[0]);
+    corrected.producers[0].metadata = {
+      export_code: "COD-VALIDADO",
+      export_origin: "Origen confirmado de prueba",
+    };
+    await expect(sync(corrected, 9)).rejects.toThrow("justificación");
+    corrected.audit_logs.push({
+      ...base(org),
+      entity_type: "producers",
+      entity_id: before.id,
+      action: "Productor corregido",
+      actor: "Cliente",
+      before,
+      after: corrected.producers[0],
+      reason: "Registro de exportación confirmado",
+    });
+    await db.exec("begin");
+    try {
+      await sync(corrected, 9);
+      const rows = await db.query<{ metadata: unknown }>(
+        "select metadata from producers where id=$1",
+        [before.id],
+      );
+      expect(rows.rows[0].metadata).toEqual(corrected.producers[0].metadata);
+      const logs = await db.query(
+        "select id from audit_logs where entity_id=$1 and reason=$2",
+        [before.id, "Registro de exportación confirmado"],
+      );
+      expect(logs.rows).toHaveLength(1);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
 });
 
 const recipient = "50000000-0000-4000-8000-000000000001";
@@ -596,6 +642,7 @@ describe.sequential("acceso limitado del destinatario", () => {
     expect(features.rows[0].value).toEqual({
       reception_edit: true,
       recipient_access: true,
+      label_export_data: true,
     });
   });
   it("solo el administrador concede pallets y valida UUID, correo y organización", async () => {
@@ -848,5 +895,195 @@ describe.sequential("acceso limitado del destinatario", () => {
       "select name from producers",
     );
     expect(internal.rows[0].name).toBe("Elias Galeano");
+  });
+});
+
+describe.sequential("datos de etiquetas de exportación", () => {
+  it("bloquea la declaración SENAVE de Uruguay con destino distinto también al crear por sincronización", async () => {
+    await actingAs(user);
+    const currentRevision = (
+      await db.query<{ revision: number }>(
+        "select revision::int from organizations where id=$1",
+        [org],
+      )
+    ).rows[0].revision;
+    const incoming = await remote();
+    incoming.pallets.push({
+      ...base(org, "En armado", user),
+      code: "TEST-EXPORT",
+      token: crypto.randomUUID(),
+      destination: "Argentina",
+      assembled_at: new Date().toISOString(),
+      responsible: "Packing confirmado",
+      net_kg: 1,
+      gross_kg: 1,
+      fruit_count: null,
+      notes: "",
+      metadata: { export_label: { senave_program: true } },
+    });
+    await expect(sync(incoming, currentRevision)).rejects.toThrow(
+      "pallets_export_metadata_check",
+    );
+    await db.exec("begin");
+    try {
+      await db.exec("reset role");
+      await db.query(
+        "update pallets set destination='Pendiente de confirmar' where id=$1",
+        [unassignedPallet],
+      );
+      await db.exec("set role authenticated");
+      await expect(
+        db.query(
+          "select public.update_pallet_export_label($1,$2::jsonb,'Confirmado',$3)",
+          [
+            unassignedPallet,
+            JSON.stringify({ senave_program: true }),
+            currentRevision,
+          ],
+        ),
+      ).rejects.toThrow("destino Uruguay confirmado");
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+  it("actualiza solo metadata, con revisión, identidad real y auditoría", async () => {
+    await actingAs(user);
+    await db.exec("begin");
+    try {
+      const before = await db.query<{
+        pallet: Record<string, unknown>;
+        revision: number;
+      }>(
+        "select to_jsonb(p) as pallet,o.revision::int as revision from pallets p join organizations o on o.id=p.organization_id where p.id=$1",
+        [unassignedPallet],
+      );
+      const fields = {
+        afidi: "AFIDI-CONFIRMADO",
+        packaged_date: "2026-10-02",
+        harvest_date: "2026-10-01",
+        producer_code: "COD-CONFIRMADO",
+        origin: "Origen confirmado",
+        senave_program: true,
+      };
+      await db.query(
+        "select public.update_pallet_export_label($1,$2::jsonb,$3,$4)",
+        [
+          unassignedPallet,
+          JSON.stringify(fields),
+          "Documento confirmado para etiqueta",
+          before.rows[0].revision,
+        ],
+      );
+      const after = await db.query<{
+        pallet: Record<string, unknown>;
+        revision: number;
+      }>(
+        "select to_jsonb(p) as pallet,o.revision::int as revision from pallets p join organizations o on o.id=p.organization_id where p.id=$1",
+        [unassignedPallet],
+      );
+      expect(after.rows[0].pallet.metadata).toEqual({ export_label: fields });
+      expect(after.rows[0].revision).toBe(before.rows[0].revision + 1);
+      const unchanged = (value: Record<string, unknown>) =>
+        Object.fromEntries(
+          Object.entries(value).filter(
+            ([key]) => !["metadata", "updated_at"].includes(key),
+          ),
+        );
+      expect(unchanged(after.rows[0].pallet)).toEqual(
+        unchanged(before.rows[0].pallet),
+      );
+      const logs = await db.query<{
+        actor: string;
+        created_by: string;
+        before: { metadata: unknown };
+        after: { metadata: unknown };
+      }>(
+        `select actor,created_by,"before","after" from audit_logs where entity_id=$1 and reason=$2`,
+        [unassignedPallet, "Documento confirmado para etiqueta"],
+      );
+      expect(logs.rows).toHaveLength(1);
+      expect(logs.rows[0].actor).toBe("Admin prueba");
+      expect(logs.rows[0].created_by).toBe(user);
+      expect(logs.rows[0].before.metadata).toBeNull();
+      expect(logs.rows[0].after.metadata).toEqual({ export_label: fields });
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+  it("rechaza revisión vieja, datos inválidos, falta de justificación y pallets cerrados", async () => {
+    await actingAs(user);
+    const revision = (
+      await db.query<{ revision: number }>(
+        "select revision::int from organizations where id=$1",
+        [org],
+      )
+    ).rows[0].revision;
+    const update = (
+      id: string,
+      fields: unknown,
+      reason: string,
+      expected = revision,
+    ) =>
+      db.query("select public.update_pallet_export_label($1,$2::jsonb,$3,$4)", [
+        id,
+        JSON.stringify(fields),
+        reason,
+        expected,
+      ]);
+    await expect(
+      update(unassignedPallet, { afidi: "123" }, "Confirmado", revision - 1),
+    ).rejects.toThrow("Conflicto");
+    await expect(update(unassignedPallet, {}, "")).rejects.toThrow(
+      "justificación",
+    );
+    for (const value of [
+      { packaged_date: "2026-02-30" },
+      { net_kg: 888 },
+      { senave_program: "true" },
+      { origin: null },
+    ])
+      await expect(
+        update(unassignedPallet, value, "Confirmado"),
+      ).rejects.toThrow("inválidos");
+    await expect(
+      update(snapshot.pallets[0].id, {}, "Confirmado"),
+    ).rejects.toThrow("cerrado");
+    await expect(update(foreignPallet, {}, "Confirmado")).rejects.toThrow(
+      "su organización",
+    );
+  });
+  it("mantiene funciones privilegiadas privadas y niega destinatario, recepción y llamadas anónimas", async () => {
+    await actingAs(user);
+    const defs = await db.query<{ schema: string; definer: boolean }>(
+      "select n.nspname as schema,p.prosecdef as definer from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname='update_pallet_export_label'",
+    );
+    expect(defs.rows).toHaveLength(2);
+    for (const definition of defs.rows)
+      expect(definition.definer).toBe(
+        definition.schema === "agronorte_private",
+      );
+    const call = () =>
+      db.query(
+        "select public.update_pallet_export_label($1,'{}'::jsonb,'Confirmado',9)",
+        [unassignedPallet],
+      );
+    await actingAs(recipient);
+    await expect(call()).rejects.toThrow("no puede editar");
+    await db.exec("reset role");
+    await db.query("update profiles set role='recepcion' where user_id=$1", [
+      user,
+    ]);
+    await actingAs(user);
+    await expect(call()).rejects.toThrow("no puede editar");
+    await db.exec("reset role");
+    await db.query(
+      "update profiles set role='administrador' where user_id=$1",
+      [user],
+    );
+    await actingAs(null, "anon");
+    await expect(call()).rejects.toThrow("permission denied");
+    await actingAs(null);
+    await expect(call()).rejects.toThrow("Inicie sesión");
+    await actingAs(user);
   });
 });

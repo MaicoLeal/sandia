@@ -91,9 +91,9 @@ Logotipo `PRINCIPAL.png` confirmado no Drive oficial, preservado em `public/agro
 - Instalação PWA requer publicação HTTPS. APK Capacitor não foi gerado.
 - Integrações com balança, leitor de câmera, impressora dedicada, n8n e envio de mensagens não estão conectadas.
 - O módulo calcula e documenta a carga; não substitui documentos sanitários, aduaneiros ou requisitos legais de exportação.
-- Relatórios usam CSV e impressão/PDF; não geram XLSX nativo ou PDF por biblioteca nesta versão.
+- Relatórios usam CSV e impressão/PDF; não geram XLSX nativo. Etiquetas também têm download de PDF A4 por biblioteca.
 - Administração de perfis e reversões de classificação/expedição são feitas por procedimento administrativo; não existe uma tela completa de gestão desses processos.
-- Etiqueta padrão é A5; ajuste formato físico e margens para a impressora de etiquetas da operação durante homologação.
+- Etiqueta padrão é A4 horizontal, uma etiqueta por folha; confirme papel A4, orientação paisagem, escala 100% e ausência de cabeçalhos/rodapés na impressora da operação.
 
 ## Arquivos principais
 
@@ -119,3 +119,13 @@ Logotipo `PRINCIPAL.png` confirmado no Drive oficial, preservado em `public/agro
 - **Informes → Pérdidas por región** reúne peso recebido, peso avaliado, perdas, índice, produtores e cobertura da seleção por período. O denominador do índice inclui apenas recepções selecionadas. Registros cancelados são excluídos.
 - A referência de revisão começa em 5% e pode ser ajustada no relatório. Não é um limiar agronômico validado. A indicação discreta **Revisar registros** exige região informada e ao menos duas entregas selecionadas; não diagnostica pragas e não gera aviso no dashboard.
 - A migração `202610020006_regional_loss_observations.sql` adiciona três campos opcionais a `classifications`, preservando compatibilidade com clientes anteriores, auditoria, imutabilidade da seleção e proteção por organização.
+
+### Etiqueta A4 de exportação
+
+- **Pallets → selecionar produtor → Etiqueta / QR** mostra o modelo da cooperativa em A4 horizontal (297 × 210 mm), com tabela de espécie, origem, código oficial do produtor, peso líquido do pallet, colheita, envasado e AFIDI. QR, código de pallet, lote, recepção, destino e responsável continuam na etiqueta.
+- **Descargar PDF A4** gera uma folha com tamanho físico definido, adequada para impressão em escala 100%. **Imprimir A4** valida os dados antes de abrir a impressão do navegador. Textos que ultrapassam o espaço disponível são recusados com uma mensagem para revisão, sem corte silencioso. O pedido de impressão/download do PDF é auditado; isso não confirma a impressão física.
+- Aplique `supabase/migrations/20261005225807_pallet_export_label.sql` depois da migração de correções/destinatários. Em instalação existente, execute somente esta atualização. Os campos extras ficam disponíveis quando o servidor confirma a nova função; recarregue e sincronize o aplicativo após aplicar.
+- **Productores → Editar productor → Datos para etiqueta de exportación** guarda código oficial e origem. **Datos de la etiqueta**, no pallet aberto, permite AFIDI, data de envasado e dados específicos de colheita/origem/código, com justificativa e auditoria. Administrador, gestor e packing podem editar a etiqueta; mudanças remotas exigem conexão, revisão atual e ausência de sincronização pendente.
+- RUC/CI e UUID não substituem o código oficial. Colheita utiliza a data real do lote ou a data explicitamente informada para o pallet. Envasado requer data própria; não usa automaticamente recepção ou montagem. Campos ausentes aparecem como **No informado/a**.
+- Marque **Lote incluido en el programa SENAVE para Uruguay** somente após confirmar a inclusão real. Essa confirmação exige destino Uruguay e habilita a declaração do modelo fornecido, com *Anastrepha grandis* e número do lote. O formato reproduz o modelo da cooperativa; a etiqueta não comprova autorização/certificação por si só. Referências: [resolução DGSA 24/2009 e anexo do MGAP](https://www.gub.uy/ministerio-ganaderia-agricultura-pesca/sites/ministerio-ganaderia-agricultura-pesca/files/2020-07/Resoluci%C3%B3n%2024%20y%20anexo.pdf) e [solicitação AFIDI](https://www.gub.uy/tramites/solicitud-afidi-safidi-solicitud-autorizacion-fitosanitaria-ingreso).
+- O QR continua usando o token público e as cinco informações já publicadas; os novos campos não ampliam a consulta pública. Não se pode imprimir/download do PDF/QR enquanto a etiqueta estiver pendente de sincronização.

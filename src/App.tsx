@@ -31,6 +31,7 @@ import type {
   Reception,
   Table,
   PalletTrace,
+  PalletExportLabel,
 } from "./types";
 import {
   intakeSelection,
@@ -76,7 +77,11 @@ import {
   saveDraft,
   saveFile,
 } from "./services/storage";
-import { publicTrace, supabase } from "./services/supabase";
+import {
+  publicTrace,
+  supabase,
+  updatePalletExportLabel,
+} from "./services/supabase";
 import { exportCsv, printReport, receptionRows } from "./services/reports";
 
 type Page =
@@ -94,6 +99,7 @@ type Dialog =
   | "weight"
   | "classification"
   | "pallet"
+  | "edit_export"
   | "shipment"
   | "settings"
   | null;
@@ -117,6 +123,26 @@ const number = (form: HTMLFormElement, key: string) => {
 };
 const optionalNumber = (form: HTMLFormElement, key: string) =>
   text(form, key) ? number(form, key) : null;
+const exportLabelFromForm = (form: HTMLFormElement): PalletExportLabel => ({
+  afidi: text(form, "afidi"),
+  packaged_date: text(form, "packaged_date") || null,
+  harvest_date: text(form, "export_harvest_date") || null,
+  producer_code: text(form, "pallet_producer_code"),
+  origin: text(form, "pallet_origin"),
+  senave_program: new FormData(form).get("senave_program") === "on",
+});
+const assertExportDestination = (
+  fields: PalletExportLabel,
+  destination: string,
+) => {
+  if (
+    fields.senave_program &&
+    destination.trim().toLocaleLowerCase("es") !== "uruguay"
+  )
+    throw new Error(
+      "El programa SENAVE para Uruguay requiere destino Uruguay confirmado.",
+    );
+};
 function PublicTrace() {
   const [trace, setTrace] = useState<PalletTrace | null>(null);
   const [error, setError] = useState("");
@@ -257,6 +283,7 @@ function WorkspaceApp() {
     null,
   );
   const [label, setLabel] = useState<Pallet | null>(null);
+  const [labelSaving, setLabelSaving] = useState(false);
   const [recipientAccessOpen, setRecipientAccessOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -358,6 +385,8 @@ function WorkspaceApp() {
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
   const actor = workspace.profile?.name ?? "Operador local";
+  const exportFieldsEnabled =
+    workspace.localOnly || Boolean(workspace.features?.label_export_data);
   const draftKey = org + ":" + (user ?? "local") + ":reception";
   const record = (
     d: Data,
@@ -1406,6 +1435,7 @@ function WorkspaceApp() {
               weight: "Registrar pesaje",
               classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
+              edit_export: "Datos de exportación para etiqueta",
               shipment: "Nueva expedición",
               settings: "Configuración",
             }[dialog]
@@ -1439,6 +1469,15 @@ function WorkspaceApp() {
                     community: text(form, "community"),
                     address: text(form, "address"),
                     notes: text(form, "notes"),
+                    ...(exportFieldsEnabled
+                      ? {
+                          metadata: {
+                            ...editingProducer?.metadata,
+                            export_code: text(form, "export_code"),
+                            export_origin: text(form, "export_origin"),
+                          },
+                        }
+                      : {}),
                   };
                   await commit((d) => {
                     if (editingProducer) {
@@ -1457,7 +1496,11 @@ function WorkspaceApp() {
                         existing.community === p.community &&
                         existing.address === p.address &&
                         existing.status === p.status &&
-                        existing.notes === p.notes
+                        existing.notes === p.notes &&
+                        (existing.metadata?.export_code ?? "") ===
+                          (p.metadata?.export_code ?? "") &&
+                        (existing.metadata?.export_origin ?? "") ===
+                          (p.metadata?.export_origin ?? "")
                       )
                         throw new Error(
                           "Cambie al menos un dato para guardar.",
@@ -1472,6 +1515,9 @@ function WorkspaceApp() {
                         community: p.community,
                         address: p.address,
                         notes: p.notes,
+                        ...(exportFieldsEnabled
+                          ? { metadata: p.metadata }
+                          : {}),
                       });
                       record(
                         d,
@@ -1539,6 +1585,35 @@ function WorkspaceApp() {
               <Field label="Observaciones">
                 <textarea name="notes" defaultValue={editingProducer?.notes} />
               </Field>
+              <details className="optional-fields">
+                <summary>Datos para etiqueta de exportación</summary>
+                <p className="hint">
+                  Complete los datos confirmados del productor. No se usa el
+                  documento personal como código de exportación.
+                </p>
+                {!exportFieldsEnabled && (
+                  <p className="hint">
+                    El administrador debe activar la actualización de etiquetas
+                    en Supabase.
+                  </p>
+                )}
+                <Field label="Código del productor para exportación">
+                  <input
+                    name="export_code"
+                    maxLength={100}
+                    defaultValue={editingProducer?.metadata?.export_code}
+                    disabled={!exportFieldsEnabled}
+                  />
+                </Field>
+                <Field label="Origen confirmado (departamento / país)">
+                  <input
+                    name="export_origin"
+                    maxLength={200}
+                    defaultValue={editingProducer?.metadata?.export_origin}
+                    disabled={!exportFieldsEnabled}
+                  />
+                </Field>
+              </details>
               {editingProducer && (
                 <Field label="Motivo de la corrección *">
                   <textarea
@@ -2080,6 +2155,7 @@ function WorkspaceApp() {
               data={data}
               actor={actor}
               busy={busy}
+              exportFieldsEnabled={exportFieldsEnabled}
               selectedReception={selectedReception}
               onSave={async (form) => {
                 await run(async () => {
@@ -2088,6 +2164,11 @@ function WorkspaceApp() {
                   const net = number(form, "net");
                   const gross = optionalNumber(form, "gross");
                   const count = number(form, "count");
+                  const exportFields = exportLabelFromForm(form);
+                  assertExportDestination(
+                    exportFields,
+                    text(form, "destination"),
+                  );
                   if (!Number.isInteger(count) || count < 1 || count > 100)
                     throw new Error("Use entre 1 y 100 pallets.");
                   await commit((d) => {
@@ -2110,6 +2191,13 @@ function WorkspaceApp() {
                         net_kg: net,
                         fruit_count: optionalNumber(form, "fruits"),
                         notes: text(form, "notes"),
+                        ...(exportFieldsEnabled
+                          ? {
+                              metadata: {
+                                export_label: exportFields,
+                              },
+                            }
+                          : {}),
                       };
                       d.pallets.push(p);
                       d.pallet_items.push({
@@ -2129,6 +2217,112 @@ function WorkspaceApp() {
                 });
               }}
             />
+          )}
+          {dialog === "edit_export" && label && (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = event.currentTarget;
+                void (async () => {
+                  setError("");
+                  setLabelSaving(true);
+                  try {
+                    allowed("pallet");
+                    const current = data.pallets.find((p) => p.id === label.id);
+                    if (
+                      !current ||
+                      ["Expedido", "Cancelado"].includes(current.status)
+                    )
+                      throw new Error("El pallet está cerrado.");
+                    const reason = text(form, "export_reason");
+                    if (!reason)
+                      throw new Error(
+                        "Indique el motivo del registro o corrección.",
+                      );
+                    const fields = exportLabelFromForm(form);
+                    assertExportDestination(fields, current.destination);
+                    if (workspace.localOnly) {
+                      await commit((draft) => {
+                        const pallet = draft.pallets.find(
+                          (p) => p.id === label.id,
+                        )!;
+                        const before = structuredClone(pallet);
+                        pallet.metadata = {
+                          ...pallet.metadata,
+                          export_label: fields,
+                        };
+                        pallet.updated_at = now();
+                        record(
+                          draft,
+                          "pallets",
+                          pallet.id,
+                          "Datos de etiqueta corregidos",
+                          before,
+                          structuredClone(pallet),
+                          reason,
+                        );
+                      });
+                    } else {
+                      if (!online)
+                        throw new Error(
+                          "Conéctese para guardar los datos de exportación.",
+                        );
+                      if (!exportFieldsEnabled)
+                        throw new Error(
+                          "Active la actualización SQL de etiquetas en Supabase.",
+                        );
+                      if (workspace.pending || workspace.needsRefresh)
+                        throw new Error(
+                          "Sincronice primero para conservar los registros pendientes.",
+                        );
+                      await updatePalletExportLabel(
+                        current.id,
+                        fields,
+                        reason,
+                        workspace.revision,
+                      );
+                      await reload();
+                    }
+                    setDialog(null);
+                    setMessage("Datos de exportación guardados con historial.");
+                  } catch (problem) {
+                    setError(
+                      problem instanceof Error
+                        ? problem.message
+                        : "No se pudo guardar.",
+                    );
+                  } finally {
+                    setLabelSaving(false);
+                  }
+                })();
+              }}
+            >
+              <p className="hint">
+                Complete únicamente los datos confirmados para este pallet.
+                Estos datos no modifican los pesos ni el origen histórico del
+                lote.
+              </p>
+              <ExportLabelFields
+                value={
+                  data.pallets.find((p) => p.id === label.id)?.metadata
+                    ?.export_label
+                }
+              />
+              <Field label="Motivo del registro o corrección *">
+                <textarea name="export_reason" required />
+              </Field>
+              <Submit disabled={busy || labelSaving}>
+                {labelSaving ? "Guardando…" : "Guardar datos de etiqueta"}
+              </Submit>
+              <button
+                type="button"
+                className="button secondary full"
+                disabled={labelSaving}
+                onClick={() => setDialog(null)}
+              >
+                Volver a la etiqueta
+              </button>
+            </form>
           )}
           {dialog === "shipment" && (
             <form
@@ -2394,7 +2588,7 @@ function WorkspaceApp() {
             onClose={() => setRecipientAccessOpen(false)}
           />
         )}
-      {label && (
+      {label && dialog !== "edit_export" && (
         <Modal title="Etiqueta y QR de pallet" onClose={close}>
           <Label
             data={data}
@@ -2407,6 +2601,18 @@ function WorkspaceApp() {
             online={online}
             syncError={error}
             onSync={sync}
+            onEditExport={
+              can(role, "pallet") &&
+              !["Expedido", "Cancelado"].includes(
+                (data.pallets.find((p) => p.id === label.id) ?? label).status,
+              ) &&
+              exportFieldsEnabled
+                ? () => {
+                    setError("");
+                    setDialog("edit_export");
+                  }
+                : undefined
+            }
             onPrinted={async () => {
               allowed("pallet");
               if (
@@ -3380,12 +3586,14 @@ function PalletForm({
   actor,
   busy,
   selectedReception,
+  exportFieldsEnabled,
   onSave,
 }: {
   data: Data;
   actor: string;
   busy: boolean;
   selectedReception: string | null;
+  exportFieldsEnabled: boolean;
   onSave: (form: HTMLFormElement) => Promise<void>;
 }) {
   const [id, setId] = useState(selectedReception ?? "");
@@ -3463,8 +3671,78 @@ function PalletForm({
       <Field label="Observaciones">
         <textarea name="notes" />
       </Field>
+      <details className="optional-fields">
+        <summary>Datos de exportación para etiqueta</summary>
+        <p className="hint">
+          Opcionales. Complete únicamente los datos confirmados; los mismos
+          datos se aplican a todos los pallets creados aquí.
+        </p>
+        {exportFieldsEnabled ? (
+          <ExportLabelFields />
+        ) : (
+          <p className="hint">
+            El administrador debe activar la actualización de etiquetas en
+            Supabase.
+          </p>
+        )}
+      </details>
       <Submit disabled={busy}>Crear pallets</Submit>
     </form>
+  );
+}
+function ExportLabelFields({ value }: { value?: PalletExportLabel }) {
+  return (
+    <>
+      <Field label="N° de AFIDI">
+        <input name="afidi" maxLength={100} defaultValue={value?.afidi} />
+      </Field>
+      <div className="form-grid">
+        <Field label="Fecha de cosecha para esta etiqueta">
+          <input
+            type="date"
+            name="export_harvest_date"
+            defaultValue={value?.harvest_date ?? ""}
+          />
+        </Field>
+        <Field label="Fecha de envasado confirmada">
+          <input
+            type="date"
+            name="packaged_date"
+            defaultValue={value?.packaged_date ?? ""}
+          />
+        </Field>
+      </div>
+      <p className="hint">
+        Si deja la cosecha vacía, se muestra la fecha registrada en el lote,
+        cuando exista. El envasado se completa por separado.
+      </p>
+      <Field label="Código del productor para esta etiqueta (opcional)">
+        <input
+          name="pallet_producer_code"
+          maxLength={100}
+          defaultValue={value?.producer_code}
+        />
+      </Field>
+      <Field label="Origen confirmado para esta etiqueta (opcional)">
+        <input
+          name="pallet_origin"
+          maxLength={200}
+          defaultValue={value?.origin}
+        />
+      </Field>
+      <p className="hint">
+        Si deja código u origen vacíos, se usan los datos de exportación del
+        productor, cuando estén registrados.
+      </p>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          name="senave_program"
+          defaultChecked={value?.senave_program ?? false}
+        />
+        Lote incluido en el programa SENAVE para Uruguay
+      </label>
+    </>
   );
 }
 function Reports({

@@ -15,6 +15,7 @@ export interface Base {
   status: string;
 }
 export interface Producer extends Base {
+  metadata?: { export_code?: string; export_origin?: string } | null;
   name: string;
   document: string;
   phone: string;
@@ -76,6 +77,7 @@ export interface Classification extends Base {
   notes: string;
 }
 export interface Pallet extends Base {
+  metadata?: { export_label?: PalletExportLabel } | null;
   code: string;
   token: string;
   destination: string;
@@ -86,6 +88,14 @@ export interface Pallet extends Base {
   net_kg: number;
   fruit_count: number | null;
   notes: string;
+}
+export interface PalletExportLabel {
+  senave_program?: boolean;
+  afidi?: string;
+  packaged_date?: string | null;
+  harvest_date?: string | null;
+  producer_code?: string;
+  origin?: string;
 }
 export interface PalletItem extends Base {
   pallet_id: string;
@@ -146,7 +156,11 @@ export interface Data {
 }
 export type Table = keyof Data;
 export interface Workspace {
-  features?: { reception_edit?: boolean; recipient_access?: boolean };
+  features?: {
+    reception_edit?: boolean;
+    recipient_access?: boolean;
+    label_export_data?: boolean;
+  };
   needsRefresh?: boolean;
   data: Data;
   revision: number;

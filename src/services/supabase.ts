@@ -6,6 +6,7 @@ import type {
   PalletTrace,
   RecipientPallet,
   RecipientAccount,
+  PalletExportLabel,
 } from "../types";
 import { getFile } from "./storage";
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -136,6 +137,26 @@ export async function setRecipientAccess(
     pallet_ids: palletIds,
   });
   if (error) throw new Error(error.message);
+}
+export async function updatePalletExportLabel(
+  palletId: string,
+  fields: PalletExportLabel,
+  reason: string,
+  revision: number,
+) {
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const { error } = await supabase.rpc("update_pallet_export_label", {
+    target_pallet_id: palletId,
+    export_fields: fields,
+    correction_reason: reason.trim(),
+    expected_revision: revision,
+  });
+  if (error)
+    throw new Error(
+      error.code === "PGRST202"
+        ? "Aplique la actualización SQL de etiquetas de exportación en Supabase."
+        : error.message,
+    );
 }
 export async function syncRemote(workspace: Workspace) {
   if (!supabase || workspace.localOnly)

@@ -1666,8 +1666,293 @@ th {
     display: none;
   }
   @page {
-    size: A5 portrait;
+    size: A4 landscape;
     margin: 8mm;
+  }
+}
+
+.modal:has(.export-label) {
+  width: min(1080px, calc(100% - 28px));
+}
+.label-format-note {
+  margin-bottom: 16px;
+}
+.export-label.print-label {
+  max-width: none;
+  padding: 16px;
+  border: 4px solid #006f32;
+  border-radius: 14px;
+  color: #111;
+  text-align: left;
+}
+.export-label-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 14px;
+  gap: 8px;
+}
+.print-label .export-label-logo {
+  width: min(58%, 530px);
+  height: auto;
+  aspect-ratio: 140 / 47;
+  object-fit: cover;
+  margin: 0;
+}
+.export-label-context {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 18px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.export-label-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 185px;
+  gap: 14px;
+}
+.export-label-fields {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.export-label-fields th,
+.export-label-fields td {
+  border: 2px solid #111;
+  padding: 11px 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.export-label-fields th {
+  width: 37%;
+  background: #006f32;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.export-label-fields td {
+  font-size: 18px;
+  line-height: 1.25;
+}
+.export-label-fields td.export-label-weight {
+  font-size: 27px;
+  font-weight: 700;
+}
+.export-label-trace {
+  border: 2px solid #006f32;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+  gap: 8px;
+}
+.export-label-qr-title {
+  color: #006f32;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.print-label .export-label-qr {
+  width: 100%;
+  max-width: 180px;
+  height: auto;
+  margin: 0;
+}
+.export-label-code {
+  font-size: 12px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.export-label-trace dl {
+  width: 100%;
+  font-size: 11px;
+  margin: 0;
+}
+.export-label-trace dt {
+  color: #54634c;
+  margin-top: 5px;
+}
+.export-label-trace dd {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.export-label-declaration {
+  border: 2px solid #111;
+  margin-top: 14px;
+  padding: 12px;
+  text-align: center;
+  font-weight: 700;
+}
+.export-label-declaration p {
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0 0 6px;
+}
+.export-label-declaration > strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+@media screen and (max-width: 780px) {
+  .export-label.print-label {
+    padding: 10px;
+    border-width: 3px;
+  }
+  .export-label-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .print-label .export-label-logo {
+    width: 85%;
+  }
+  .export-label-context {
+    font-size: 10px;
+  }
+  .export-label-fields th {
+    font-size: 10px;
+    width: 43%;
+    padding: 8px 6px;
+  }
+  .export-label-fields td {
+    font-size: 13px;
+    padding: 8px 6px;
+  }
+  .export-label-fields td.export-label-weight {
+    font-size: 23px;
+  }
+  .export-label-trace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+  }
+  .export-label-qr-title {
+    grid-column: 1/-1;
+  }
+  .print-label .export-label-qr {
+    grid-column: 1;
+    grid-row: 2/4;
+  }
+  .export-label-code,
+  .export-label-trace dl {
+    grid-column: 2;
+  }
+  .export-label-declaration p,
+  .export-label-declaration > strong {
+    font-size: 12px;
+  }
+  .label-format-note {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+@media print {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+  .modal:has(.export-label) {
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    margin: 0;
+  }
+  .export-label.print-label {
+    width: 281mm;
+    height: 194mm;
+    max-width: none;
+    margin: 0;
+    padding: 4mm;
+    border-width: 1.2mm;
+    border-radius: 3mm;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .export-label-head {
+    height: 61.5mm;
+    padding: 0 0 3mm;
+    gap: 2mm;
+  }
+  .print-label .export-label-logo {
+    width: 140mm;
+    height: 47mm;
+    margin: 0;
+    max-height: none;
+  }
+  .export-label-context {
+    font-size: 9pt;
+    line-height: 1.1;
+    gap: 1mm 4mm;
+  }
+  .export-label-main {
+    height: 91mm;
+    grid-template-columns: minmax(0, 1fr) 51mm;
+    gap: 4mm;
+  }
+  .export-label-fields tr {
+    height: 13mm;
+  }
+  .export-label-fields th,
+  .export-label-fields td {
+    padding: 1mm 3mm;
+    border-width: 0.5mm;
+    line-height: 1.1;
+  }
+  .export-label-fields th {
+    width: 37%;
+    font-size: 12pt;
+  }
+  .export-label-fields td {
+    font-size: var(--label-print-size, 12.5pt);
+  }
+  .export-label-fields td.export-label-weight {
+    font-size: var(--label-print-size, 23pt);
+  }
+  .export-label-trace {
+    padding: 2mm;
+    gap: 1mm;
+    border-width: 0.5mm;
+  }
+  .export-label-qr-title {
+    font-size: 9pt;
+  }
+  .print-label .export-label-qr {
+    width: 42mm;
+    height: 42mm;
+    max-width: none;
+    margin: 0;
+  }
+  .export-label-code {
+    font-size: 8.5pt;
+  }
+  .export-label-trace dl {
+    font-size: 8pt;
+    line-height: 1.1;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.5mm 1mm;
+    text-align: left;
+  }
+  .export-label-trace dt {
+    margin-top: 0;
+  }
+  .export-label-declaration {
+    margin-top: 4mm;
+    height: 26.5mm;
+    padding: 2mm;
+    border-width: 0.5mm;
+  }
+  .export-label-declaration p {
+    font-size: 13pt;
+    line-height: 1.1;
+    margin-bottom: 1mm;
+  }
+  .export-label-declaration > strong {
+    font-size: 12pt;
   }
 }
 
