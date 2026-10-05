@@ -1782,6 +1782,7 @@ th {
   overflow-wrap: anywhere;
 }
 .export-label-declaration {
+  color: #111;
   border: 2px solid #111;
   margin-top: 14px;
   padding: 12px;
