@@ -1,25 +1,52 @@
 import { createClient } from "@supabase/supabase-js";
-import type { Data, Profile, Workspace, PalletTrace } from "../types";
+import type {
+  Data,
+  Profile,
+  Workspace,
+  PalletTrace,
+  RecipientPallet,
+  RecipientAccount,
+} from "../types";
 import { getFile } from "./storage";
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = url && key ? createClient(url, key) : null;
-export async function loadRemote(): Promise<Workspace> {
+export class WorkspaceAccessError extends Error {}
+export async function loadProfile(): Promise<Profile> {
   if (!supabase) throw new Error("Supabase no configurado.");
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error("Inicie sesión.");
+  if (!user) throw new WorkspaceAccessError("Inicie sesión.");
   const profileResult = await supabase
     .from("profiles")
     .select("*")
     .eq("user_id", user.id)
     .single();
-  if (profileResult.error)
+  if (profileResult.error) {
+    if (profileResult.error.code === "PGRST116")
+      throw new WorkspaceAccessError(
+        "Su usuario necesita un perfil y una organización asignados por el administrador.",
+      );
     throw new Error(
-      "Su usuario necesita un perfil y una organización asignados por el administrador.",
+      "No se pudo verificar su acceso. Intente nuevamente con conexión.",
     );
+  }
   const profile = profileResult.data as Profile;
+  if (profile.status !== "Activo")
+    throw new WorkspaceAccessError(
+      "Su acceso está inactivo. Consulte al administrador.",
+    );
+  return profile;
+}
+export async function loadRemote(): Promise<Workspace> {
+  const profile = await loadProfile();
+  if (profile.role === "destinatario")
+    throw new WorkspaceAccessError(
+      "Acceso de consulta de pallets. Abra el portal de destinatario.",
+    );
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const capabilities = await supabase.rpc("sandia_features");
   const { data: organization, error } = await supabase
     .from("organizations")
     .select("revision")
@@ -69,6 +96,7 @@ export async function loadRemote(): Promise<Workspace> {
       "Los datos cambiaron durante la consulta. Sincronice nuevamente.",
     );
   return {
+    features: capabilities.error ? {} : capabilities.data,
     data: Object.fromEntries(results) as unknown as Data,
     revision: organization.revision,
     pending: false,
@@ -76,6 +104,38 @@ export async function loadRemote(): Promise<Workspace> {
     organizationId: profile.organization_id,
     profile,
   };
+}
+export async function loadRecipientPallets(): Promise<RecipientPallet[]> {
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const { data, error } = await supabase.rpc("recipient_pallets");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as RecipientPallet[];
+}
+export async function listRecipientAccounts(): Promise<RecipientAccount[]> {
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const { data, error } = await supabase.rpc("list_recipient_accounts");
+  if (error)
+    throw new Error(
+      error.code === "PGRST202"
+        ? "Aplique la actualización SQL de destinatarios en Supabase para activar este acceso."
+        : error.message,
+    );
+  return (data ?? []) as RecipientAccount[];
+}
+export async function setRecipientAccess(
+  userId: string,
+  email: string,
+  name: string,
+  palletIds: string[],
+) {
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const { error } = await supabase.rpc("set_recipient_pallet_access", {
+    target_user_id: userId,
+    target_email: email.trim().toLowerCase(),
+    target_name: name.trim(),
+    pallet_ids: palletIds,
+  });
+  if (error) throw new Error(error.message);
 }
 export async function syncRemote(workspace: Workspace) {
   if (!supabase || workspace.localOnly)

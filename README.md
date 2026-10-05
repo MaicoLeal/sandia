@@ -34,7 +34,7 @@ VITE_PUBLIC_TRACE_URL=https://SEU-DOMINIO/
 
 1. Aplique as migrações de `supabase/migrations/` em ordem de nome, em um projeto novo, pelo SQL Editor ou pelo fluxo de migrações Supabase.
 2. Crie o usuário em Authentication > Users, com senha definida pelo próprio usuário. A conta do painel Supabase é diferente de um usuário Auth do aplicativo.
-3. Aplique o bootstrap de organização/perfil após substituir o UUID do usuário em `supabase/bootstrap.example.sql`. A primeira conta precisa de perfil administrador. Perfis seguintes são atribuídos por SQL administrativo nesta primeira versão.
+3. Aplique o bootstrap de organização/perfil após substituir o UUID do usuário em `supabase/bootstrap.example.sql`. A primeira conta precisa de perfil administrador. Perfis internos seguintes são atribuídos por SQL administrativo; contas de destinatários e seus pallets são vinculados pela tela descrita abaixo.
 4. No aplicativo, inicie sessão. O espaço autenticado carrega os registros da organização; exemplos de teste nunca são enviados ao banco de produção.
 5. Depois de publicar, configure `VITE_PUBLIC_TRACE_URL` com a URL HTTPS real e gere as etiquetas. QR com localhost não funciona em outro celular.
 
@@ -76,7 +76,7 @@ No navegador, armazenamento local e sessão dependem do acesso ao dispositivo. S
 
 As tabelas utilizam UUID e organização; FKs compostas impedem ligar entidades de organizações diferentes. RLS permite leitura apenas da organização do perfil ativo. Escritas ocorrem pela RPC transacional, que valida perfil, revisão e integridade; clientes não recebem DELETE nem escrita direta.
 
-O banco preserva o código/nome de lote informado (único por organização) e gera um código quando ele está vazio. Gera os códigos finais dos pallets, datas e auditoria. O operador vê um código provisório local até a sincronização. Auditoria preserva antes/depois e usuário. Correções de peso exigem gestor/administrador e motivo; uma recepção já classificada exige reversão supervisionada, ainda não disponível na interface. Correção de data antes da classificação exige justificativa e gera auditoria. Cancelamento de recepção antes da classificação preserva as pesagens e registra justificativa. Pallets expedidos e vínculos operacionais não podem ser editados diretamente.
+O banco preserva o código/nome de lote informado (único por organização) e gera um código quando ele está vazio. Gera os códigos finais dos pallets, datas e auditoria. O operador vê um código provisório local até a sincronização. Auditoria preserva antes/depois e usuário. Correções de peso exigem gestor/administrador e motivo; uma recepção já classificada exige reversão supervisionada, ainda não disponível na interface. Data, responsável e observações da recepção podem ser corrigidos com justificativa mesmo depois da classificação e palletização, sem alterar origem, pesagens ou vínculos. Cancelamento de recepção antes da classificação preserva as pesagens e registra justificativa. Pallets expedidos e vínculos operacionais não podem ser editados diretamente.
 
 Anexos são privados (máximo 10 MB), com leitura autenticada e URLs assinadas. O QR usa token opaco e mostra publicamente somente código, produto, peso líquido, destino e status. Uma sessão da mesma organização permite consultar também produtor, lote, parcela/localidade, data de recepção, data de pesagem e peso alocado, pela RPC privada. O botão de detalhe abre diretamente o pallet escaneado. A solicitação de impressão é auditada; o navegador não confirma que a impressora fisicamente imprimiu.
 
@@ -98,6 +98,18 @@ Logotipo `PRINCIPAL.png` confirmado no Drive oficial, preservado em `public/agro
 ## Arquivos principais
 
 `src/App.tsx`: telas e formulários. `src/domain.ts`: cálculos e regras. `src/types.ts`: tipos relacionais. `src/useWorkspace.ts`: persistência e sincronização. `src/services/supabase.ts`: Auth, tabelas, Storage e RPC. `src/services/reports.ts`: exportação e impressão. `supabase/migrations/`: esquema e regras do servidor.
+
+### Correções e consulta para destinatários
+
+- **Productores → selecionar produtor → Editar productor** abre os dados existentes: nome, documento, telefone, comunidade, endereço, estado e observações. Gestor/administrador informa o motivo; o histórico preserva valores anteriores e novos.
+- **Recepción → selecionar entrega → Editar recepción** permite corrigir data, responsável e observações. Alterações de peso continuam em **Pesajes → Corregir**. Os registros do lote, da seleção e dos pallets permanecem vinculados à mesma recepção.
+- Aplique `supabase/migrations/20261005165516_recipient_access_reception_edit.sql` depois das seis migrações anteriores. Em instalação existente, aplique somente a migração nova, sem reaplicar inicialização ou importação de dados. Ela habilita as RPCs e o perfil `destinatario`; não cria contas nem concede pallets automaticamente.
+- Depois de aplicar a migração, recarregue/sincronize o aplicativo. **Editar recepción** fica indisponível em uma conexão cujo banco ainda não recebeu a atualização.
+- Crie uma conta distinta para o destinatário em **Supabase → Authentication → Users**, com senha definida pelo usuário ou pelo administrador no painel. Anote o e-mail e o UUID, sem compartilhar a senha no chat. Uma conta interna existente não pode ser convertida em destinatário pela tela.
+- Entre no aplicativo com administrador e abra **Pallets → Acceso de destinatarios**. Informe nome, e-mail e UUID da conta; selecione somente os pallets que ela deve consultar e salve. Só pallets sincronizados e não cancelados podem ser liberados. Ao editar a conta, a seleção substitui a anterior; desmarcar todos revoga todos os pallets.
+- A conta destinatária usa o mesmo endereço e login, mas recebe **Mis pallets de sandía**, com busca e atualização. Consulta somente os pallets concedidos: produto, códigos de pallet/lote, peso líquido/bruto, estado, destino, datas de recepção/pesagem/montagem e dados básicos da expedição (destino, país e saída).
+- O destinatário não carrega o espaço interno, cadastro/identidade dos produtores, parcelas, fotos, documentos, responsáveis, observações, auditoria ou relatórios da cooperativa. As regras no PostgreSQL bloqueiam leitura direta, Storage, sincronização e consulta privada do QR. O QR público continua contendo somente as cinco informações já publicadas; códigos de lote e datas adicionais exigem a conta autorizada.
+- A consulta do destinatário requer internet e não guarda uma cópia offline dos pallets. Atualizar ou retomar a tela verifica novamente as concessões. As edições internas continuam com rascunho local e sincronização auditada; mudanças de conta limpam imediatamente o espaço exibido.
 
 ### Entrada mobile e acompanhamento de perdas
 

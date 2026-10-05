@@ -1,5 +1,11 @@
 export type Role =
-  "administrador" | "recepcion" | "pesaje" | "packing" | "gestor" | "auditor";
+  | "administrador"
+  | "recepcion"
+  | "pesaje"
+  | "packing"
+  | "gestor"
+  | "auditor"
+  | "destinatario";
 export interface Base {
   id: string;
   organization_id: string;
@@ -140,6 +146,7 @@ export interface Data {
 }
 export type Table = keyof Data;
 export interface Workspace {
+  features?: { reception_edit?: boolean; recipient_access?: boolean };
   needsRefresh?: boolean;
   data: Data;
   revision: number;
@@ -147,6 +154,28 @@ export interface Workspace {
   localOnly: boolean;
   organizationId: string;
   profile: Profile | null;
+}
+
+export interface RecipientPallet {
+  code: string;
+  token: string;
+  product: string;
+  net_kg: number;
+  gross_kg: number | null;
+  status: string;
+  destination: string;
+  assembled_at: string;
+  weighed_date: string | null;
+  reception_dates: string[];
+  lot_codes: string[];
+  shipments: { destination: string; country: string; departure: string }[];
+}
+
+export interface RecipientAccount {
+  user_id: string;
+  email: string;
+  name: string;
+  pallet_ids: string[];
 }
 
 export interface PalletTrace {

@@ -14,6 +14,7 @@ import {
   Leaf,
   LogOut,
   PackageCheck,
+  Pencil,
   Plus,
   Scale,
   Search,
@@ -55,6 +56,8 @@ import {
 } from "./domain";
 import { LossFields } from "./LossFields";
 import { useWorkspace } from "./useWorkspace";
+import { RecipientPortal } from "./RecipientPortal";
+import { RecipientAccess } from "./RecipientAccess";
 import {
   Badge,
   Brand,
@@ -87,6 +90,7 @@ type Dialog =
   | "producer"
   | "plot"
   | "reception"
+  | "edit_reception"
   | "weight"
   | "classification"
   | "pallet"
@@ -119,7 +123,10 @@ function PublicTrace() {
   useEffect(() => {
     const token = new URLSearchParams(location.search).get("trace") ?? "";
     const lookup = async () => {
-      const local = await readWorkspace(LOCAL_KEY);
+      const local =
+        !supabase && import.meta.env.VITE_REQUIRE_AUTH !== "true"
+          ? await readWorkspace(LOCAL_KEY)
+          : null;
       const p = local?.data.pallets.find(
         (p) => p.token === token && p.status !== "Cancelado",
       );
@@ -222,6 +229,8 @@ export default function App() {
 }
 function WorkspaceApp() {
   const {
+    recipientProfile,
+    reload,
     needsLogin,
     workspace,
     error,
@@ -241,7 +250,14 @@ function WorkspaceApp() {
     null,
   );
   const [selectedProducer, setSelectedProducer] = useState<string | null>(null);
+  const [editingProducerId, setEditingProducerId] = useState<string | null>(
+    null,
+  );
+  const [editingReceptionId, setEditingReceptionId] = useState<string | null>(
+    null,
+  );
   const [label, setLabel] = useState<Pallet | null>(null);
+  const [recipientAccessOpen, setRecipientAccessOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
   const [palletToken, setPalletToken] = useState(() =>
@@ -252,6 +268,9 @@ function WorkspaceApp() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const close = useCallback(() => {
     setDialog(null);
+    setEditingProducerId(null);
+    setEditingReceptionId(null);
+    setReturnToReception(false);
     setLabel(null);
   }, []);
   useEffect(() => {
@@ -268,11 +287,33 @@ function WorkspaceApp() {
     };
   }, [setError]);
   if (needsLogin) return <LoginScreen error={error} onError={setError} />;
+  if (recipientProfile)
+    return (
+      <RecipientPortal
+        key={recipientProfile.user_id}
+        profile={recipientProfile}
+      />
+    );
   if (!workspace)
     return (
       <div className="loading">
         <Brand />
         <p>{error || "Preparando el espacio de trabajo…"}</p>
+        {error && (
+          <div className="row">
+            <button className="button secondary" onClick={() => void reload()}>
+              Reintentar
+            </button>
+            {supabase && (
+              <button
+                className="button ghost"
+                onClick={() => void supabase?.auth.signOut()}
+              >
+                Cerrar sesión
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   const data = workspace.data;
@@ -384,6 +425,8 @@ function WorkspaceApp() {
       disabled={!can(role, permission) || busy}
       onClick={() => {
         setError("");
+        setEditingProducerId(null);
+        setEditingReceptionId(null);
         setDialog(type);
       }}
     >
@@ -394,6 +437,12 @@ function WorkspaceApp() {
   const detail = selectedReception ? origin(data, selectedReception) : null;
   const producer = selectedProducer
     ? data.producers.find((p) => p.id === selectedProducer)
+    : null;
+  const editingProducer = editingProducerId
+    ? data.producers.find((p) => p.id === editingProducerId)
+    : null;
+  const editingReception = editingReceptionId
+    ? data.receptions.find((r) => r.id === editingReceptionId)
     : null;
   const producerReceptions = producer
     ? data.receptions.filter(
@@ -1027,7 +1076,17 @@ function WorkspaceApp() {
                   )}{" "}
                   kg netos
                 </p>
-                {newButton("Crear pallet", "pallet", "pallet")}
+                <div className="row">
+                  {role === "administrador" && !workspace.localOnly && (
+                    <button
+                      className="button secondary"
+                      onClick={() => setRecipientAccessOpen(true)}
+                    >
+                      Acceso de destinatarios
+                    </button>
+                  )}
+                  {newButton("Crear pallet", "pallet", "pallet")}
+                </div>
               </div>
               <div className="pallet-filters panel">
                 <Field label="Filtrar por productor">
@@ -1306,9 +1365,12 @@ function WorkspaceApp() {
         <Modal
           title={
             {
-              producer: producer ? "Editar productor" : "Nuevo productor",
+              producer: editingProducer
+                ? "Editar productor"
+                : "Nuevo productor",
               plot: "Nueva propiedad y parcela",
               reception: "Nueva recepción",
+              edit_reception: "Editar recepción",
               weight: "Registrar pesaje",
               classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
@@ -1329,9 +1391,14 @@ function WorkspaceApp() {
                 e.preventDefault();
                 const form = e.currentTarget;
                 void run(async () => {
-                  allowed(producer ? "correct" : "catalog");
+                  if (editingProducerId && !editingProducer)
+                    throw new Error("El productor ya no está disponible.");
+                  allowed(editingProducer ? "correct" : "catalog");
+                  if (!text(form, "name"))
+                    throw new Error("Ingrese el nombre del productor.");
                   const p = {
-                    ...(producer ?? base(org, text(form, "status"), user)),
+                    ...(editingProducer ??
+                      base(org, text(form, "status"), user)),
                     updated_at: now(),
                     status: text(form, "status"),
                     name: text(form, "name"),
@@ -1342,22 +1409,45 @@ function WorkspaceApp() {
                     notes: text(form, "notes"),
                   };
                   await commit((d) => {
-                    if (producer) {
+                    if (editingProducer) {
                       const reason = text(form, "reason");
                       if (!reason)
                         throw new Error("Indique el motivo de la corrección.");
                       const existing = d.producers.find(
-                        (x) => x.id === producer.id,
-                      )!;
+                        (x) => x.id === editingProducer.id,
+                      );
+                      if (!existing)
+                        throw new Error("El productor ya no está disponible.");
+                      if (
+                        existing.name === p.name &&
+                        existing.document === p.document &&
+                        existing.phone === p.phone &&
+                        existing.community === p.community &&
+                        existing.address === p.address &&
+                        existing.status === p.status &&
+                        existing.notes === p.notes
+                      )
+                        throw new Error(
+                          "Cambie al menos un dato para guardar.",
+                        );
                       const before = structuredClone(existing);
-                      Object.assign(existing, p);
+                      Object.assign(existing, {
+                        updated_at: p.updated_at,
+                        status: p.status,
+                        name: p.name,
+                        document: p.document,
+                        phone: p.phone,
+                        community: p.community,
+                        address: p.address,
+                        notes: p.notes,
+                      });
                       record(
                         d,
                         "producers",
                         p.id,
                         "Productor corregido",
                         before,
-                        p,
+                        structuredClone(existing),
                         reason,
                       );
                     } else {
@@ -1378,45 +1468,57 @@ function WorkspaceApp() {
                   name="name"
                   required
                   autoFocus
-                  defaultValue={producer?.name}
+                  defaultValue={editingProducer?.name}
                 />
               </Field>
               <div className="form-grid">
                 <Field label="Documento / RUC / CI">
-                  <input name="document" defaultValue={producer?.document} />
+                  <input
+                    name="document"
+                    defaultValue={editingProducer?.document}
+                  />
                 </Field>
                 <Field label="Teléfono">
                   <input
                     name="phone"
                     type="tel"
-                    defaultValue={producer?.phone}
+                    defaultValue={editingProducer?.phone}
                   />
                 </Field>
               </div>
               <Field label="Comunidad / localidad">
-                <input name="community" defaultValue={producer?.community} />
+                <input
+                  name="community"
+                  defaultValue={editingProducer?.community}
+                />
               </Field>
               <Field label="Dirección o referencia">
-                <input name="address" defaultValue={producer?.address} />
+                <input name="address" defaultValue={editingProducer?.address} />
               </Field>
               <Field label="Estado">
                 <select
                   name="status"
-                  defaultValue={producer?.status ?? "Activo"}
+                  defaultValue={editingProducer?.status ?? "Activo"}
                 >
                   <option>Activo</option>
                   <option>Inactivo</option>
                 </select>
               </Field>
               <Field label="Observaciones">
-                <textarea name="notes" defaultValue={producer?.notes} />
+                <textarea name="notes" defaultValue={editingProducer?.notes} />
               </Field>
-              {producer && (
+              {editingProducer && (
                 <Field label="Motivo de la corrección *">
-                  <textarea name="reason" required />
+                  <textarea
+                    name="reason"
+                    required
+                    placeholder="Explique qué datos se corrigieron y por qué"
+                  />
                 </Field>
               )}
-              <Submit disabled={busy} />
+              <Submit disabled={busy}>
+                {editingProducer ? "Guardar cambios" : "Guardar productor"}
+              </Submit>
             </form>
           )}
           {dialog === "plot" && (
@@ -1516,6 +1618,8 @@ function WorkspaceApp() {
               actor={actor}
               allowSelection={can(role, "classify")}
               onQuickCreate={(type) => {
+                setEditingProducerId(null);
+                setEditingReceptionId(null);
                 setReturnToReception(true);
                 setDialog(type);
               }}
@@ -1670,6 +1774,100 @@ function WorkspaceApp() {
                 });
               }}
             />
+          )}
+          {dialog === "edit_reception" && editingReception && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const value = text(form, "date");
+                const responsible = text(form, "responsible");
+                const notes = text(form, "notes");
+                const reason = text(form, "reason");
+                void run(async () => {
+                  allowed("correct");
+                  if (!reason)
+                    throw new Error("Indique el motivo de la corrección.");
+                  if (!responsible)
+                    throw new Error("Ingrese el responsable de la recepción.");
+                  if (
+                    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+                    Number.isNaN(Date.parse(value)) ||
+                    new Date(value).toISOString().slice(0, 10) !== value
+                  )
+                    throw new Error("Ingrese una fecha de recepción válida.");
+                  await commit((d) => {
+                    const reception = d.receptions.find(
+                      (r) => r.id === editingReception.id,
+                    );
+                    if (!reception || reception.status === "Cancelado")
+                      throw new Error("Esta recepción no se puede editar.");
+                    if (
+                      reception.date === value &&
+                      reception.responsible === responsible &&
+                      reception.notes === notes
+                    )
+                      throw new Error("Cambie al menos un dato para guardar.");
+                    const before = structuredClone(reception);
+                    reception.date = value;
+                    reception.responsible = responsible;
+                    reception.notes = notes;
+                    reception.updated_at = now();
+                    record(
+                      d,
+                      "receptions",
+                      reception.id,
+                      "Recepción corregida",
+                      before,
+                      structuredClone(reception),
+                      reason,
+                    );
+                  });
+                }, "Cambios guardados. Se conserva el historial de la recepción.");
+              }}
+            >
+              <p>
+                <strong>
+                  {origin(data, editingReception.id).producer?.name}
+                </strong>
+                {" · Lote "}
+                {origin(data, editingReception.id).lot?.code}
+              </p>
+              <p className="hint">
+                {kg(receptionTotal(data, editingReception.id))} kg recibidos.
+                Los pesos se corrigen desde Pesajes con su justificación.
+              </p>
+              <Field label="Fecha de recepción *">
+                <input
+                  type="date"
+                  name="date"
+                  required
+                  defaultValue={editingReception.date}
+                />
+              </Field>
+              <Field label="Responsable *">
+                <input
+                  name="responsible"
+                  required
+                  defaultValue={editingReception.responsible}
+                />
+              </Field>
+              <Field label="Observaciones">
+                <textarea name="notes" defaultValue={editingReception.notes} />
+              </Field>
+              <Field label="Motivo de la corrección *">
+                <textarea
+                  name="reason"
+                  required
+                  placeholder="Explique qué datos se corrigieron y por qué"
+                />
+              </Field>
+              <p className="hint">
+                Esta fecha corresponde a la recepción. La fecha del pesaje de
+                cada pallet se mantiene en su propio registro.
+              </p>
+              <Submit disabled={busy}>Guardar cambios</Submit>
+            </form>
           )}
           {dialog === "weight" && (
             <form
@@ -2156,6 +2354,14 @@ function WorkspaceApp() {
           )}
         </Modal>
       )}
+      {recipientAccessOpen &&
+        role === "administrador" &&
+        !workspace.localOnly && (
+          <RecipientAccess
+            pallets={data.pallets}
+            onClose={() => setRecipientAccessOpen(false)}
+          />
+        )}
       {label && (
         <Modal title="Etiqueta y QR de pallet" onClose={close}>
           <Label
@@ -2218,6 +2424,23 @@ function WorkspaceApp() {
               {detail.reception.responsible}
             </p>
           </div>
+          {can(role, "correct") && detail.reception.status !== "Cancelado" && (
+            <button
+              className="button secondary full"
+              disabled={
+                busy ||
+                (!workspace.localOnly && !workspace.features?.reception_edit)
+              }
+              onClick={() => {
+                setError("");
+                setEditingReceptionId(detail.reception!.id);
+                setDialog("edit_reception");
+              }}
+            >
+              <Pencil size={18} />
+              Editar recepción
+            </button>
+          )}
           {detail.reception.notes && (
             <p className="hint">{detail.reception.notes}</p>
           )}
@@ -2233,62 +2456,6 @@ function WorkspaceApp() {
               )}
             {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
           </div>
-          {can(role, "correct") &&
-            detail.reception.status !== "Cancelado" &&
-            !data.classifications.some(
-              (c) => c.reception_id === detail.reception?.id,
-            ) && (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const form = e.currentTarget;
-                  const value = text(form, "corrected_date");
-                  const reason = text(form, "date_reason");
-                  void run(async () => {
-                    allowed("correct");
-                    if (!reason) throw new Error("Indique la justificación.");
-                    if (
-                      !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-                      Number.isNaN(Date.parse(value)) ||
-                      new Date(value).toISOString().slice(0, 10) !== value
-                    )
-                      throw new Error("Fecha inválida. Use AAAA-MM-DD.");
-                    await commit((d) => {
-                      const r = d.receptions.find(
-                        (r) => r.id === detail.reception!.id,
-                      )!;
-                      const before = structuredClone(r);
-                      r.date = value;
-                      r.updated_at = now();
-                      record(
-                        d,
-                        "receptions",
-                        r.id,
-                        "Recepción corregida",
-                        before,
-                        r,
-                        reason,
-                      );
-                    });
-                  });
-                }}
-              >
-                <Field label="Fecha correcta (AAAA-MM-DD)">
-                  <input
-                    name="corrected_date"
-                    required
-                    defaultValue={detail.reception.date}
-                    pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}"
-                  />
-                </Field>
-                <Field label="Justificación de la fecha">
-                  <input name="date_reason" required />
-                </Field>
-                <Submit disabled={busy}>
-                  Corregir fecha con justificación
-                </Submit>
-              </form>
-            )}
           {can(role, "correct") &&
             detail.reception.status !== "Cancelado" &&
             !data.classifications.some(
@@ -2330,6 +2497,14 @@ function WorkspaceApp() {
               >
                 Cancelar recepción con justificación
               </button>
+            )}
+          {can(role, "correct") &&
+            !workspace.localOnly &&
+            !workspace.features?.reception_edit && (
+              <p className="hint">
+                La edición de recepción requiere habilitar la actualización del
+                sistema con el administrador.
+              </p>
             )}
           <h3>Pesajes</h3>
           <div className="weight-table">
@@ -2499,6 +2674,20 @@ function WorkspaceApp() {
         >
           <Badge>{producer.status}</Badge>
           <h2>{producer.name}</h2>
+          {can(role, "correct") && (
+            <button
+              className="button secondary full"
+              disabled={busy}
+              onClick={() => {
+                setError("");
+                setEditingProducerId(producer.id);
+                setDialog("producer");
+              }}
+            >
+              <Pencil size={18} />
+              Editar productor
+            </button>
+          )}
           <p>
             Pérdidas registradas:{" "}
             <strong>
@@ -2528,14 +2717,6 @@ function WorkspaceApp() {
             )}
           </div>
 
-          {can(role, "correct") && (
-            <button
-              className="button secondary"
-              onClick={() => setDialog("producer")}
-            >
-              Editar datos del productor
-            </button>
-          )}
           <p>
             {producer.community} · {producer.phone || "Sin teléfono"}
           </p>

@@ -10,3 +10,4 @@ dist/
 !.env.example
 *.tsbuildinfo
 playwright-artifacts/
+supabase/.temp/

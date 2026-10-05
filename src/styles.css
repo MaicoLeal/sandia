@@ -866,6 +866,76 @@ footer {
   background: #16300a66;
   backdrop-filter: blur(3px);
 }
+.recipient-view {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+.recipient-view > .brand {
+  margin-bottom: 24px;
+}
+.recipient-view h1 {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+}
+.recipient-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0;
+}
+.recipient-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.recipient-card h2 {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+  margin: 16px 0 8px;
+}
+.recipient-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 10px;
+  margin: 20px 0;
+}
+.recipient-details dt {
+  color: #6f7f67;
+}
+.recipient-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.recipient-options {
+  border: 1px solid #dce7d1;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 16px 0;
+}
+.recipient-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  min-height: 56px;
+}
+.recipient-option input {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.recipient-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.recipient-option small {
+  display: block;
+  margin-top: 4px;
+  color: #6f7f67;
+}
 .modal-head {
   display: flex;
   justify-content: space-between;
@@ -1780,4 +1850,8 @@ th {
 .regional-card h3 {
   margin-top: 0;
 }
-.producer-actions { display: grid; gap: 10px; margin: 16px 0; }
+.producer-actions {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}

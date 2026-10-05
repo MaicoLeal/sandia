@@ -7,6 +7,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      "outputs",
       "node_modules",
       ".toolchain",
       ".lock-generation",
