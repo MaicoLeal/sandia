@@ -317,32 +317,44 @@ function WorkspaceApp() {
       </div>
     );
   const data = workspace.data;
+  const scannedPallet = palletToken
+    ? data.pallets.find((p) => p.token === palletToken)
+    : null;
+  const scannedProducerId = scannedPallet
+    ? (data.pallet_items
+        .filter((item) => item.pallet_id === scannedPallet.id)
+        .map((item) => origin(data, item.reception_id).producer?.id ?? "")
+        .filter(Boolean)
+        .sort()[0] ?? "")
+    : "";
+  const activePalletProducerId = palletProducerId || scannedProducerId;
+  const palletProducer = data.producers.find(
+    (p) => p.id === activePalletProducerId,
+  );
   const visiblePallets = palletToken
     ? data.pallets.filter((p) => p.token === palletToken)
     : data.pallets;
-  const palletGroups = groupPalletsByProducer(
-    data,
-    visiblePallets.filter((p) => {
-      const origins = data.pallet_items
-        .filter((item) => item.pallet_id === p.id)
-        .map((item) => origin(data, item.reception_id));
-      if (
-        palletProducerId &&
-        !origins.some((o) => o.producer?.id === palletProducerId)
-      )
-        return false;
-      return [
-        p.code,
-        p.net_kg,
-        kg(p.net_kg),
-        p.destination,
-        ...origins.flatMap((o) => [o.producer?.name, o.lot?.code]),
-      ]
-        .join(" ")
-        .toLocaleLowerCase("es")
-        .includes(palletSearch.trim().toLocaleLowerCase("es"));
-    }),
-  );
+  const filteredPallets = visiblePallets.filter((p) => {
+    const origins = data.pallet_items
+      .filter((item) => item.pallet_id === p.id)
+      .map((item) => origin(data, item.reception_id));
+    if (
+      !activePalletProducerId ||
+      !origins.some((o) => o.producer?.id === activePalletProducerId)
+    )
+      return false;
+    return [
+      p.code,
+      p.net_kg,
+      kg(p.net_kg),
+      p.destination,
+      ...origins.flatMap((o) => [o.producer?.name, o.lot?.code]),
+    ]
+      .join(" ")
+      .toLocaleLowerCase("es")
+      .includes(palletSearch.trim().toLocaleLowerCase("es"));
+  });
+  const palletGroups = groupPalletsByProducer(data, filteredPallets);
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
   const actor = workspace.profile?.name ?? "Operador local";
@@ -1068,13 +1080,20 @@ function WorkspaceApp() {
             <>
               <div className="toolbar">
                 <p>
-                  {data.pallets.length} pallets registrados ·{" "}
-                  {kg(
-                    data.pallets
-                      .filter((p) => p.status !== "Cancelado")
-                      .reduce((sum, p) => sum + p.net_kg, 0),
-                  )}{" "}
-                  kg netos
+                  {palletProducer ? (
+                    <>
+                      {filteredPallets.length} pallets de {palletProducer.name}{" "}
+                      ·{" "}
+                      {kg(
+                        filteredPallets
+                          .filter((p) => p.status !== "Cancelado")
+                          .reduce((sum, p) => sum + p.net_kg, 0),
+                      )}{" "}
+                      kg netos
+                    </>
+                  ) : (
+                    "Seleccione un productor para consultar sus pallets."
+                  )}
                 </p>
                 <div className="row">
                   {role === "administrador" && !workspace.localOnly && (
@@ -1089,22 +1108,29 @@ function WorkspaceApp() {
                 </div>
               </div>
               <div className="pallet-filters panel">
-                <Field label="Filtrar por productor">
+                <Field label="Productor">
                   <select
-                    value={palletProducerId}
-                    onChange={(e) => setPalletProducerId(e.target.value)}
+                    value={activePalletProducerId}
+                    onChange={(e) => {
+                      setPalletProducerId(e.target.value);
+                      setPalletToken(null);
+                      setPalletSearch("");
+                    }}
                   >
-                    <option value="">Todos los productores</option>
-                    {data.producers.map((producer) => (
-                      <option key={producer.id} value={producer.id}>
-                        {producer.name}
-                      </option>
-                    ))}
+                    <option value="">Seleccione un productor</option>
+                    {[...data.producers]
+                      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                      .map((producer) => (
+                        <option key={producer.id} value={producer.id}>
+                          {producer.name}
+                        </option>
+                      ))}
                   </select>
                 </Field>
                 <Field label="Buscar pallet, lote o peso">
                   <input
                     type="search"
+                    disabled={!activePalletProducerId}
                     value={palletSearch}
                     onChange={(e) => setPalletSearch(e.target.value)}
                     placeholder="Código, lote o kg"
@@ -1116,9 +1142,13 @@ function WorkspaceApp() {
                   <p>Consulta del pallet escaneado</p>
                   <button
                     className="button secondary"
-                    onClick={() => setPalletToken(null)}
+                    onClick={() => {
+                      setPalletProducerId(activePalletProducerId);
+                      setPalletToken(null);
+                      setPalletSearch("");
+                    }}
                   >
-                    Ver todos los pallets
+                    Ver pallets de este productor
                   </button>
                 </div>
               )}
@@ -1241,9 +1271,11 @@ function WorkspaceApp() {
                   <Empty>
                     {palletToken
                       ? "No se encontró este pallet en su organización."
-                      : data.pallets.length
-                        ? "No hay pallets con estos filtros. Cambie el productor o la búsqueda."
-                        : "Cree el primer pallet después de clasificar una recepción."}
+                      : !activePalletProducerId
+                        ? "Seleccione un productor para ver sus pallets y abrir Etiqueta / QR."
+                        : data.pallets.length
+                          ? "No hay pallets con estos filtros. Cambie el productor o la búsqueda."
+                          : "Cree el primer pallet después de clasificar una recepción."}
                   </Empty>
                 )}
               </div>
