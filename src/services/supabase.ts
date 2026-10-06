@@ -9,6 +9,7 @@ import type {
   PalletExportLabel,
 } from "../types";
 import { getFile } from "./storage";
+import type { PalletCorrectionValues } from "../pallet-corrections";
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = url && key ? createClient(url, key) : null;
@@ -177,6 +178,38 @@ export async function updatePalletLabelDetails(
     throw new Error(
       error.code === "PGRST202"
         ? "Aplique la actualización SQL de edición de etiquetas en Supabase y sincronice nuevamente."
+        : error.message,
+    );
+}
+export async function revisePallet(
+  palletId: string,
+  values: PalletCorrectionValues,
+  revision: number,
+) {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const common = {
+    target_pallet_id: palletId,
+    correction_reason: values.reason.trim(),
+    expected_revision: revision,
+  };
+  const { error } =
+    values.action === "cancel"
+      ? await supabase.rpc("cancel_pallet", common)
+      : await supabase.rpc("correct_pallet", {
+          ...common,
+          corrected_fields: {
+            net_kg: values.netKg,
+            gross_kg: values.grossKg,
+            fruit_count: values.fruitCount,
+            weighed_date: values.weighedDate,
+            responsible: values.responsible.trim(),
+            notes: values.notes,
+          },
+        });
+  if (error)
+    throw new Error(
+      ["PGRST202", "42883"].includes(error.code)
+        ? "El administrador debe activar la actualización de correcciones de pallets en Supabase y sincronizar nuevamente."
         : error.message,
     );
 }

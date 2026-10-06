@@ -143,6 +143,7 @@ export function Label({
   const [error, setError] = useState("");
   const [preparingPdf, setPreparingPdf] = useState(false);
   const [printSizes, setPrintSizes] = useState<number[]>([]);
+  const cancelled = pallet.status === "Cancelado";
   const label = palletLabelData(data, pallet);
   const publicBase =
     import.meta.env.VITE_PUBLIC_TRACE_URL ||
@@ -166,6 +167,8 @@ export function Label({
     setError("");
     setPreparingPdf(true);
     try {
+      if (cancelled)
+        throw new Error("No se puede imprimir un pallet cancelado.");
       const { createPalletLabelPdf, loadLabelLogo, labelPrintFontSizes } =
         await import("./services/pallet-label-pdf");
       createPalletLabelPdf(label, { logo: await loadLabelLogo(), qr });
@@ -185,6 +188,10 @@ export function Label({
     setError("");
     setPreparingPdf(true);
     try {
+      if (cancelled)
+        throw new Error(
+          "No se puede descargar la etiqueta de un pallet cancelado.",
+        );
       const { createPalletLabelPdf, loadLabelLogo } =
         await import("./services/pallet-label-pdf");
       const logo = await loadLabelLogo();
@@ -346,20 +353,20 @@ export function Label({
         <button
           className="button primary"
           onClick={() => void print()}
-          disabled={!qr || pending || busy || preparingPdf}
+          disabled={!qr || cancelled || pending || busy || preparingPdf}
         >
           <Printer size={18} />
           Imprimir A4
         </button>
         <button
           className="button secondary"
-          disabled={!qr || pending || busy || preparingPdf}
+          disabled={!qr || cancelled || pending || busy || preparingPdf}
           onClick={() => void downloadPdf()}
         >
           <Download size={18} />
           {preparingPdf ? "Preparando PDF…" : "Descargar PDF A4"}
         </button>
-        {qr && !pending && !busy && !preparingPdf && (
+        {qr && !cancelled && !pending && !busy && !preparingPdf && (
           <a
             className="button secondary"
             download={pallet.code + "-qr.png"}

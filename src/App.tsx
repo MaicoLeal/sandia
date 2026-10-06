@@ -63,6 +63,9 @@ import {
   summary,
 } from "./domain";
 import { LossFields } from "./LossFields";
+import { PalletCorrection } from "./PalletCorrection";
+import { assertPalletCorrection } from "./pallet-corrections";
+import type { PalletCorrectionValues } from "./pallet-corrections";
 import { useWorkspace } from "./useWorkspace";
 import { RecipientPortal } from "./RecipientPortal";
 import { RecipientAccess } from "./RecipientAccess";
@@ -89,6 +92,7 @@ import {
   supabase,
   updatePalletExportLabel,
   updatePalletLabelDetails,
+  revisePallet,
 } from "./services/supabase";
 import { exportCsv, printReport, receptionRows } from "./services/reports";
 import { palletLabelEditValues } from "./services/pallet-label-data";
@@ -99,7 +103,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06-2 · Edición de etiquetas";
+const appVersion = "2026.10.06-3 · Corrección de pallets";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -202,6 +206,8 @@ type Dialog =
   | "classification"
   | "pallet"
   | "edit_export"
+  | "edit_pallet"
+  | "cancel_pallet"
   | "shipment"
   | "settings"
   | null;
@@ -386,6 +392,13 @@ function WorkspaceApp() {
   );
   const [label, setLabel] = useState<Pallet | null>(null);
   const [labelSaving, setLabelSaving] = useState(false);
+  const [editingPalletId, setEditingPalletId] = useState<string | null>(null);
+  const [editingPalletRevision, setEditingPalletRevision] = useState<
+    number | null
+  >(null);
+  const palletSaveLock = useRef(false);
+  const [palletSaving, setPalletSaving] = useState(false);
+  const [showCancelledPallets, setShowCancelledPallets] = useState(false);
   const [recipientAccessOpen, setRecipientAccessOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -400,6 +413,8 @@ function WorkspaceApp() {
     setEditingReceptionId(null);
     setReturnToReception(false);
     setLabel(null);
+    setEditingPalletId(null);
+    setEditingPalletRevision(null);
   }, []);
   const workspaceScope = workspace
     ? `${workspace.organizationId}:${workspace.profile?.user_id ?? "local"}`
@@ -420,6 +435,7 @@ function WorkspaceApp() {
       setRecipientAccessOpen(false);
       setPalletProducerId("");
       setPalletSearch("");
+      setShowCancelledPallets(false);
       setMessage("");
     }
     previousScope.current = workspaceScope;
@@ -477,6 +493,8 @@ function WorkspaceApp() {
     ? data.pallets.filter((p) => p.token === palletToken)
     : data.pallets;
   const filteredPallets = visiblePallets.filter((p) => {
+    if (p.status === "Cancelado" && !showCancelledPallets && !palletToken)
+      return false;
     const origins = data.pallet_items
       .filter((item) => item.pallet_id === p.id)
       .map((item) => origin(data, item.reception_id));
@@ -497,6 +515,9 @@ function WorkspaceApp() {
       .includes(palletSearch.trim().toLocaleLowerCase("es"));
   });
   const palletGroups = groupPalletsByProducer(data, filteredPallets);
+  const activeFilteredPallets = filteredPallets.filter(
+    (p) => p.status !== "Cancelado",
+  );
   const org = workspace.organizationId;
   const user = workspace.profile?.user_id ?? null;
   const actor = workspace.profile?.name ?? "Operador local";
@@ -600,6 +621,117 @@ function WorkspaceApp() {
   const editingReception = editingReceptionId
     ? data.receptions.find((r) => r.id === editingReceptionId)
     : null;
+  const editingPallet =
+    scopeMatches && editingPalletId
+      ? data.pallets.find(
+          (p) => p.id === editingPalletId && p.organization_id === org,
+        )
+      : undefined;
+  const palletCorrectionEnabled =
+    workspace.localOnly || Boolean(workspace.features?.pallet_corrections);
+  const palletCorrectionBlocked =
+    editingPalletRevision !== workspace.revision
+      ? "Los datos cambiaron desde que abrió el formulario. Ciérrelo y abra nuevamente el pallet antes de corregir."
+      : !can(role, "correct")
+        ? "Solo un administrador o gestor puede corregir o cancelar pallets."
+        : !workspace.localOnly &&
+            (!online || workspace.pending || workspace.needsRefresh)
+          ? "Conéctese y sincronice los registros pendientes antes de corregir el pallet."
+          : "";
+  const savePalletCorrection = async (values: PalletCorrectionValues) => {
+    if (palletSaveLock.current) return;
+    palletSaveLock.current = true;
+    setError("");
+    setPalletSaving(true);
+    try {
+      allowed("correct");
+      if (palletCorrectionBlocked) throw new Error(palletCorrectionBlocked);
+      if (!editingPallet) throw new Error("Abra nuevamente el pallet.");
+      assertPalletCorrection(data, editingPallet, values);
+      if (workspace.localOnly) {
+        await commit((draft) => {
+          const pallet = draft.pallets.find((p) => p.id === editingPallet.id);
+          if (!pallet) throw new Error("El pallet ya no está disponible.");
+          assertPalletCorrection(draft, pallet, values);
+          const before = structuredClone(pallet);
+          if (values.action === "cancel") {
+            pallet.status = "Cancelado";
+          } else {
+            const materialChange =
+              pallet.net_kg !== values.netKg ||
+              pallet.gross_kg !== values.grossKg ||
+              pallet.fruit_count !== values.fruitCount ||
+              (pallet.weighed_date ?? null) !== values.weighedDate ||
+              pallet.responsible !== values.responsible;
+            if (pallet.net_kg !== values.netKg) {
+              const item = draft.pallet_items.find(
+                (i) => i.pallet_id === pallet.id,
+              )!;
+              const itemBefore = structuredClone(item);
+              item.kg = values.netKg;
+              item.updated_at = now();
+              record(
+                draft,
+                "pallet_items",
+                item.id,
+                "Peso de origen del pallet corregido",
+                itemBefore,
+                structuredClone(item),
+                values.reason,
+              );
+            }
+            pallet.net_kg = values.netKg;
+            pallet.gross_kg = values.grossKg;
+            pallet.fruit_count = values.fruitCount;
+            pallet.weighed_date = values.weighedDate;
+            pallet.responsible = values.responsible;
+            pallet.notes = values.notes;
+            if (materialChange) pallet.status = "En armado";
+          }
+          pallet.updated_at = now();
+          record(
+            draft,
+            "pallets",
+            pallet.id,
+            values.action === "cancel"
+              ? "Pallet cancelado"
+              : "Pallet corregido",
+            before,
+            structuredClone(pallet),
+            values.reason,
+          );
+        });
+      } else {
+        if (!palletCorrectionEnabled)
+          throw new Error(
+            "Active la actualización SQL de corrección de pallets en Supabase.",
+          );
+        if (palletCorrectionBlocked) throw new Error(palletCorrectionBlocked);
+        if (!workspace.profile) throw new Error("Inicie sesión nuevamente.");
+        await revisePallet(editingPallet.id, values, editingPalletRevision!);
+        await reload(true, {
+          userId: workspace.profile.user_id,
+          organizationId: workspace.organizationId,
+        });
+      }
+      palletSaveLock.current = false;
+      close();
+      setMessage(
+        values.action === "cancel"
+          ? "Pallet cancelado con historial. Se actualizaron la cantidad de pallets activos y el saldo disponible."
+          : "Pallet corregido con historial. Revise los datos y vuelva a imprimir la etiqueta si cambiaron.",
+      );
+    } catch (problem) {
+      setError(
+        problem instanceof Error
+          ? problem.message
+          : "No se pudo corregir el pallet.",
+      );
+    } finally {
+      palletSaveLock.current = false;
+      setPalletSaving(false);
+    }
+  };
   const producerReceptions = producer
     ? data.receptions.filter(
         (r) => origin(data, r.id).producer?.id === producer.id,
@@ -1222,12 +1354,13 @@ function WorkspaceApp() {
                 <p>
                   {palletProducer ? (
                     <>
-                      {filteredPallets.length} pallets de {palletProducer.name}{" "}
-                      ·{" "}
+                      {activeFilteredPallets.length} pallets activos de{" "}
+                      {palletProducer.name} ·{" "}
                       {kg(
-                        filteredPallets
-                          .filter((p) => p.status !== "Cancelado")
-                          .reduce((sum, p) => sum + p.net_kg, 0),
+                        activeFilteredPallets.reduce(
+                          (sum, p) => sum + p.net_kg,
+                          0,
+                        ),
                       )}{" "}
                       kg netos
                     </>
@@ -1276,7 +1409,22 @@ function WorkspaceApp() {
                     placeholder="Código, lote o kg"
                   />
                 </Field>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={showCancelledPallets}
+                    onChange={(event) =>
+                      setShowCancelledPallets(event.target.checked)
+                    }
+                  />
+                  Mostrar pallets cancelados (historial)
+                </label>
               </div>
+              <p className="hint">
+                Para ajustar la cantidad, cancele el pallet registrado de más o
+                cree los faltantes. Los kg recibidos se consultan en Recepción;
+                esta lista suma los pallets activos.
+              </p>
               {palletToken && (
                 <div className="toolbar">
                   <p>Consulta del pallet escaneado</p>
@@ -1302,8 +1450,27 @@ function WorkspaceApp() {
                           <h2>{group.name}</h2>
                         </div>
                         <p>
-                          {group.pallets.length} pallets ·{" "}
+                          {
+                            group.pallets.filter(
+                              (p) => p.status !== "Cancelado",
+                            ).length
+                          }{" "}
+                          pallets activos ·{" "}
                           <strong>{kg(group.netKg)} kg netos</strong>
+                          {group.pallets.some(
+                            (p) => p.status === "Cancelado",
+                          ) && (
+                            <>
+                              {" "}
+                              ·{" "}
+                              {
+                                group.pallets.filter(
+                                  (p) => p.status === "Cancelado",
+                                ).length
+                              }{" "}
+                              cancelados fuera del total
+                            </>
+                          )}
                         </p>
                       </header>
                       <div className="card-grid">
@@ -1351,6 +1518,7 @@ function WorkspaceApp() {
                               <div className="row">
                                 <button
                                   className="button primary pallet-label-button"
+                                  disabled={p.status === "Cancelado"}
                                   onClick={() => setLabel(p)}
                                 >
                                   <FileText size={16} />
@@ -1367,6 +1535,48 @@ function WorkspaceApp() {
                                   Origen <ArrowRight size={16} />
                                 </button>
                               </div>
+                              {can(role, "correct") &&
+                                !["Expedido", "Cancelado"].includes(p.status) &&
+                                !data.shipment_pallets.some(
+                                  (sp) => sp.pallet_id === p.id,
+                                ) && (
+                                  <div className="pallet-correction-actions">
+                                    <button
+                                      className="button secondary"
+                                      disabled={busy || palletSaving}
+                                      onClick={() => {
+                                        setError("");
+                                        setEditingPalletId(p.id);
+                                        setEditingPalletRevision(
+                                          workspace.revision,
+                                        );
+                                        setDialog("edit_pallet");
+                                      }}
+                                    >
+                                      <Pencil size={18} /> Editar pallet
+                                    </button>
+                                    <button
+                                      className="button secondary"
+                                      disabled={busy || palletSaving}
+                                      onClick={() => {
+                                        setError("");
+                                        setEditingPalletId(p.id);
+                                        setEditingPalletRevision(
+                                          workspace.revision,
+                                        );
+                                        setDialog("cancel_pallet");
+                                      }}
+                                    >
+                                      <X size={18} /> Cancelar pallet
+                                    </button>
+                                  </div>
+                                )}
+                              {p.status === "Cancelado" && (
+                                <p className="hint">
+                                  Registro conservado en el historial. No cuenta
+                                  en los totales ni permite imprimir etiqueta.
+                                </p>
+                              )}
                               {p.status !== "Expedido" &&
                                 p.status !== "Cancelado" &&
                                 can(role, "pallet") && (
@@ -1547,17 +1757,35 @@ function WorkspaceApp() {
               classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
               edit_export: "Editar etiqueta antes de imprimir",
+              edit_pallet: "Editar pallet",
+              cancel_pallet: "Cancelar pallet",
               shipment: "Nueva expedición",
               settings: "Configuración",
             }[dialog]
           }
-          onClose={close}
+          onClose={() => {
+            if (!palletSaveLock.current) close();
+          }}
         >
           {error && (
             <p className="error" role="alert">
               {error}
             </p>
           )}
+          {(dialog === "edit_pallet" || dialog === "cancel_pallet") &&
+            editingPallet && (
+              <PalletCorrection
+                key={`${org}:${user ?? "local"}:${editingPallet.id}:${editingPalletRevision}:${dialog}`}
+                data={data}
+                pallet={editingPallet}
+                action={dialog === "cancel_pallet" ? "cancel" : "edit"}
+                busy={busy || palletSaving}
+                activated={palletCorrectionEnabled}
+                blockedReason={palletCorrectionBlocked}
+                onSubmit={savePalletCorrection}
+                onCancel={close}
+              />
+            )}
           {dialog === "producer" && (
             <form
               onSubmit={(e) => {
@@ -2830,6 +3058,10 @@ function WorkspaceApp() {
             }
             onPrinted={async () => {
               allowed("pallet");
+              if (currentLabel.status === "Cancelado")
+                throw new Error(
+                  "No se puede imprimir una etiqueta de un pallet cancelado.",
+                );
               if (
                 !workspace.localOnly &&
                 (workspace.pending || workspace.needsRefresh)
@@ -2843,6 +3075,8 @@ function WorkspaceApp() {
                   throw new Error(
                     "Abra nuevamente el pallet antes de imprimir.",
                   );
+                if (p.status === "Cancelado")
+                  throw new Error("El pallet está cancelado.");
                 const before = structuredClone(p);
                 if (p.status === "En armado") p.status = "Etiquetado";
                 p.updated_at = now();
@@ -3058,6 +3292,7 @@ function WorkspaceApp() {
                 <button
                   className="record"
                   key={i.id}
+                  disabled={p.status === "Cancelado"}
                   onClick={() => setLabel(p)}
                 >
                   <Box size={18} />
@@ -3212,6 +3447,30 @@ function WorkspaceApp() {
           <h3>Entregas y lotes</h3>
           {receptionList(producerReceptions)}
           <h3>Pallets y destinos</h3>
+          <p>
+            <strong>
+              {producerPallets.filter((p) => p.status !== "Cancelado").length}{" "}
+              pallets activos ·{" "}
+              {kg(
+                producerPallets
+                  .filter((p) => p.status !== "Cancelado")
+                  .reduce((sum, p) => sum + p.net_kg, 0),
+              )}{" "}
+              kg en pallets
+            </strong>
+          </p>
+          <button
+            className="button secondary full"
+            onClick={() => {
+              setPalletProducerId(producer.id);
+              setPalletSearch("");
+              setPalletToken(null);
+              setSelectedProducer(null);
+              setPage("Pallets");
+            }}
+          >
+            <Box size={18} /> Ver / corregir pallets de este productor
+          </button>
           {producerPallets.map((p) => (
             <p key={p.id}>
               {p.code} · {p.destination} · {kg(p.net_kg)} kg · {p.status}
@@ -3977,6 +4236,7 @@ function Reports({
   const [to, setTo] = useState("");
   const [producer, setProducer] = useState("");
   const [query, setQuery] = useState("");
+  const [includeCancelledPallets, setIncludeCancelledPallets] = useState(false);
   let report: Record<string, string | number>[] = [];
   const included = (date: string) =>
     (!from || date.slice(0, 10) >= from) && (!to || date.slice(0, 10) <= to);
@@ -3994,6 +4254,7 @@ function Reports({
     );
   if (kind === "Pallet")
     report = data.pallets
+      .filter((p) => includeCancelledPallets || p.status !== "Cancelado")
       .filter((p) =>
         data.pallet_items.some(
           (i) => i.pallet_id === p.id && includedReception(i.reception_id),
@@ -4175,6 +4436,18 @@ function Reports({
           />
         </Field>
       </div>
+      {kind === "Pallet" && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={includeCancelledPallets}
+            onChange={(event) =>
+              setIncludeCancelledPallets(event.target.checked)
+            }
+          />
+          Incluir pallets cancelados para consultar el historial
+        </label>
+      )}
       {kind === "Pérdidas por región" && (
         <section className="regional-followup">
           <h2>Seguimiento de pérdidas por región</h2>

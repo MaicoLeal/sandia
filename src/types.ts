@@ -161,6 +161,7 @@ export interface Workspace {
     recipient_access?: boolean;
     label_export_data?: boolean;
     label_destination_edit?: boolean;
+    pallet_corrections?: boolean;
   };
   needsRefresh?: boolean;
   data: Data;

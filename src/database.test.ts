@@ -94,6 +94,15 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      new URL(
+        "../supabase/migrations/20261006141341_pallet_corrections.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   await db.query(
     `insert into auth.users(id,email) values($1,'admin@test.invalid');`,
     [user],
@@ -653,6 +662,7 @@ describe.sequential("acceso limitado del destinatario", () => {
       recipient_access: true,
       label_export_data: true,
       label_destination_edit: true,
+      pallet_corrections: true,
     });
   });
   it("solo el administrador concede pallets y valida UUID, correo y organización", async () => {
@@ -1404,6 +1414,525 @@ describe.sequential("edición de etiqueta antes de imprimir", () => {
         revision,
       );
       await expect(sync(before, revision)).rejects.toThrow("Conflicto");
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+});
+
+describe.sequential("corrección y cancelación auditada de pallets", () => {
+  const revision = async () =>
+    (
+      await db.query<{ n: number }>(
+        "select revision::int as n from organizations where id=$1",
+        [org],
+      )
+    ).rows[0].n;
+  const correct = (
+    id: string,
+    fields: unknown,
+    reason: string,
+    rev: number | null,
+  ) =>
+    db.query("select public.correct_pallet($1,$2::jsonb,$3,$4)", [
+      id,
+      JSON.stringify(fields),
+      reason,
+      rev,
+    ]);
+  const cancel = (id: string, reason: string, rev: number | null) =>
+    db.query("select public.cancel_pallet($1,$2,$3)", [id, reason, rev]);
+  const fields = {
+    net_kg: 400,
+    gross_kg: null,
+    fruit_count: null,
+    weighed_date: "2026-10-05",
+    responsible: "Packing confirmado",
+    notes: "Observación anterior",
+  };
+  async function fixture() {
+    await actingAs(user);
+    await db.exec("begin; reset role");
+    const receptionId = crypto.randomUUID();
+    const id = crypto.randomUUID();
+    const secondId = crypto.randomUUID();
+    const itemId = crypto.randomUUID();
+    await db.query(
+      "insert into receptions(id,organization_id,lot_id,date,responsible) values($1,$2,$3,'2026-10-05','Recepción confirmada')",
+      [receptionId, org, snapshot.field_lots[0].id],
+    );
+    await db.query(
+      "insert into reception_weights(id,organization_id,reception_id,sequence,kg,operator) values($1,$2,$3,1,1000,'Operador')",
+      [crypto.randomUUID(), org, receptionId],
+    );
+    await db.query(
+      "insert into classifications(id,organization_id,reception_id,approved_kg,rejected_kg,quality) values($1,$2,$3,1000,0,null)",
+      [crypto.randomUUID(), org, receptionId],
+    );
+    await db.query(
+      "insert into pallets(id,organization_id,code,token,destination,assembled_at,weighed_date,responsible,gross_kg,net_kg,notes,status,metadata,created_by) values($1,$2,$3,gen_random_uuid(),'Uruguay',now(),'2026-10-05',$4,null,400,$5,'Listo para carga',$6::jsonb,$7),($8,$2,$9,gen_random_uuid(),'Uruguay',now(),'2026-10-05',$4,null,300,'','En armado',null,$7)",
+      [
+        id,
+        org,
+        "CORRECCION-" + id,
+        fields.responsible,
+        fields.notes,
+        JSON.stringify({ export_label: { afidi: "DOCUMENTO-CONFIRMADO" } }),
+        user,
+        secondId,
+        "SALDO-" + secondId,
+      ],
+    );
+    await db.query(
+      "insert into pallet_items(id,organization_id,pallet_id,reception_id,kg,created_by) values($1,$2,$3,$4,400,$5),($6,$2,$7,$4,300,$5)",
+      [itemId, org, id, receptionId, user, crypto.randomUUID(), secondId],
+    );
+    await db.exec("set role authenticated");
+    return { id, secondId, itemId, receptionId, rev: await revision() };
+  }
+  async function unchangedRejected(
+    operation: () => Promise<unknown>,
+    message: string,
+  ) {
+    await db.exec("savepoint invalid_action");
+    await expect(operation()).rejects.toThrow(message);
+    await db.exec(
+      "rollback to savepoint invalid_action; release savepoint invalid_action",
+    );
+  }
+
+  it("corrige peso y asignación juntos, reabre etiquetado y audita usuario/motivo sin editar productor ni recepción", async () => {
+    const f = await fixture();
+    try {
+      const before = await remote();
+      const original = before.pallets.find((p) => p.id === f.id)!;
+      await correct(
+        f.id,
+        {
+          ...fields,
+          net_kg: 500,
+          gross_kg: 520,
+          fruit_count: 42,
+          weighed_date: "2026-10-06",
+        },
+        "Peso confirmado en balanza",
+        f.rev,
+      );
+      const after = await remote();
+      const changed = after.pallets.find((p) => p.id === f.id)!;
+      expect(changed).toMatchObject({
+        net_kg: 500,
+        gross_kg: 520,
+        fruit_count: 42,
+        weighed_date: "2026-10-06",
+        status: "En armado",
+        code: original.code,
+        token: original.token,
+        metadata: original.metadata,
+        assembled_at: original.assembled_at,
+        created_at: original.created_at,
+        created_by: original.created_by,
+        destination: original.destination,
+      });
+      expect(after.pallet_items.find((i) => i.id === f.itemId)).toMatchObject({
+        kg: 500,
+        pallet_id: f.id,
+        reception_id: f.receptionId,
+      });
+      for (const table of [
+        "producers",
+        "receptions",
+        "reception_weights",
+        "classifications",
+        "field_lots",
+      ] as const)
+        expect(after[table]).toEqual(before[table]);
+      const logs = after.audit_logs.filter(
+        (l) => l.reason === "Peso confirmado en balanza",
+      );
+      expect(logs).toHaveLength(2);
+      expect(
+        logs.every((l) => l.created_by === user && l.actor === "Admin prueba"),
+      ).toBe(true);
+      expect(
+        logs.find((l) => l.entity_type === "pallets")?.before,
+      ).toMatchObject({ net_kg: 400, status: "Listo para carga" });
+      expect(
+        logs.find((l) => l.entity_type === "pallets")?.after,
+      ).toMatchObject({ net_kg: 500, status: "En armado" });
+      expect(await revision()).toBe(f.rev + 1);
+      await correct(
+        f.id,
+        {
+          ...fields,
+          net_kg: 500,
+          gross_kg: 520,
+          fruit_count: 42,
+          weighed_date: "2026-10-06",
+        },
+        "Mismo valor confirmado",
+        f.rev + 1,
+      );
+      expect(await revision()).toBe(f.rev + 1);
+      expect((await remote()).audit_logs).toHaveLength(after.audit_logs.length);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+
+  it("conserva estado al corregir solo observaciones, sin nuevas asignaciones", async () => {
+    const f = await fixture();
+    try {
+      const before = (await remote()).pallet_items;
+      await correct(
+        f.id,
+        { ...fields, notes: "Observación corregida" },
+        "Observación confirmada",
+        f.rev,
+      );
+      expect((await remote()).pallets.find((p) => p.id === f.id)).toMatchObject(
+        { notes: "Observación corregida", status: "Listo para carga" },
+      );
+      expect((await remote()).pallet_items).toEqual(before);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+
+  it("valida saldo, pesos, cantidades, fechas, campos autorizados y justificación antes de escribir", async () => {
+    const f = await fixture();
+    try {
+      const before = await remote();
+      for (const [bad, message] of [
+        [{ ...fields, net_kg: 800 }, "Saldo insuficiente"],
+        [{ ...fields, net_kg: 0 }, "Peso inválido"],
+        [{ ...fields, net_kg: 400.001 }, "Peso inválido"],
+        [{ ...fields, gross_kg: 399 }, "Peso inválido"],
+        [{ ...fields, fruit_count: 1.5 }, "entero"],
+        [{ ...fields, fruit_count: -1 }, "entero"],
+        [{ ...fields, weighed_date: "2026-13-01" }, "date/time"],
+        [{ ...fields, weighed_date: "05/10/2026" }, "Fecha de pesaje"],
+        [{ ...fields, responsible: " " }, "responsable"],
+        [{ ...fields, net_kg: "400" }, "Tipos"],
+        [{ ...fields, token: crypto.randomUUID() }, "Datos"],
+        [{ net_kg: 400 }, "Datos"],
+      ] as [unknown, string][])
+        await unchangedRejected(
+          () => correct(f.id, bad, "Verificado", f.rev),
+          message,
+        );
+      await unchangedRejected(
+        () => correct(f.id, fields, " ", f.rev),
+        "justificación",
+      );
+      await unchangedRejected(() => cancel(f.id, " ", f.rev), "justificación");
+      expect(await remote()).toEqual(before);
+      expect(await revision()).toBe(f.rev);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+
+  it("rechaza redistribuir un pallet mixto y preserva sus orígenes; permite corregir campos sin alterar kg", async () => {
+    const f = await fixture();
+    try {
+      await db.exec("reset role");
+      const otherReception = crypto.randomUUID();
+      await db.query(
+        "insert into receptions(id,organization_id,lot_id,date,responsible) values($1,$2,$3,'2026-10-05','Origen adicional')",
+        [otherReception, org, snapshot.field_lots[0].id],
+      );
+      await db.query("update pallet_items set kg=200 where id=$1", [f.itemId]);
+      await db.query(
+        "insert into pallet_items(id,organization_id,pallet_id,reception_id,kg) values($1,$2,$3,$4,200)",
+        [crypto.randomUUID(), org, f.id, otherReception],
+      );
+      await db.exec("set role authenticated");
+      const before = (await remote()).pallet_items;
+      await unchangedRejected(
+        () => correct(f.id, { ...fields, net_kg: 450 }, "Corregido", f.rev),
+        "varios orígenes",
+      );
+      await correct(
+        f.id,
+        { ...fields, fruit_count: 40 },
+        "Conteo confirmado",
+        f.rev,
+      );
+      expect((await remote()).pallet_items).toEqual(before);
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+
+  it("cancela sin borrar identidad/origen, libera saldo, oculta QR y destinatario y no duplica auditoría", async () => {
+    const f = await fixture();
+    try {
+      await assignRecipient(recipient, "uruguay@test.invalid", [f.id]);
+      const before = await remote();
+      const original = before.pallets.find((p) => p.id === f.id)!;
+      await cancel(f.id, "Pallet duplicado confirmado", f.rev);
+      const after = await remote();
+      expect(after.pallets.find((p) => p.id === f.id)).toMatchObject({
+        ...original,
+        status: "Cancelado",
+      });
+      expect(after.pallet_items).toEqual(before.pallet_items);
+      const allocated = await db.query<{ kg: number }>(
+        "select sum(i.kg)::float as kg from pallet_items i join pallets p on p.id=i.pallet_id where i.reception_id=$1 and p.status<>'Cancelado'",
+        [f.receptionId],
+      );
+      expect(allocated.rows[0].kg).toBe(300);
+      const log = after.audit_logs.filter(
+        (l) =>
+          l.entity_id === f.id && l.reason === "Pallet duplicado confirmado",
+      );
+      expect(log).toHaveLength(1);
+      expect(log[0]).toMatchObject({
+        created_by: user,
+        actor: "Admin prueba",
+        before: { status: "Listo para carga" },
+        after: { status: "Cancelado" },
+      });
+      await cancel(f.id, "Ya cancelado", f.rev + 1);
+      expect(await revision()).toBe(f.rev + 1);
+      expect((await remote()).audit_logs).toHaveLength(after.audit_logs.length);
+      await actingAs(recipient);
+      const received = await db.query<{ value: unknown[] }>(
+        "select public.recipient_pallets() as value",
+      );
+      expect(received.rows[0].value).toEqual([]);
+      await actingAs(null, "anon");
+      expect(
+        (
+          await db.query<{ value: unknown }>(
+            "select public.public_pallet_trace($1) as value",
+            [original.token],
+          )
+        ).rows[0].value,
+      ).toBeNull();
+    } finally {
+      await db.exec("rollback");
+      await actingAs(user);
+    }
+  });
+
+  it("bloquea expedidos, cancelados, cualquier vínculo con expedición, otra organización y revisión obsoleta", async () => {
+    const f = await fixture();
+    try {
+      await unchangedRejected(
+        () => correct(foreignPallet, fields, "Verificado", f.rev),
+        "organización",
+      );
+      await unchangedRejected(
+        () => cancel(foreignPallet, "Verificado", f.rev),
+        "organización",
+      );
+      await unchangedRejected(
+        () => correct(f.id, fields, "Verificado", f.rev - 1),
+        "Conflicto",
+      );
+      await unchangedRejected(
+        () => cancel(f.id, "Verificado", null),
+        "Conflicto",
+      );
+      for (const status of ["Expedido", "Cancelado"]) {
+        await db.exec("reset role");
+        await db.query("update pallets set status=$1 where id=$2", [
+          status,
+          f.id,
+        ]);
+        await db.exec("set role authenticated");
+        await unchangedRejected(
+          () => correct(f.id, fields, "Verificado", f.rev),
+          "cerrado",
+        );
+        if (status === "Expedido")
+          await unchangedRejected(
+            () => cancel(f.id, "Verificado", f.rev),
+            "cerrado",
+          );
+      }
+      await db.exec("reset role");
+      await db.query("update pallets set status='En armado' where id=$1", [
+        f.id,
+      ]);
+      const shipment = crypto.randomUUID();
+      await db.query(
+        "insert into shipments(id,organization_id,destination,country,driver,plate,departure,responsible) values($1,$2,'Uruguay','Uruguay','Chofer','ABC123','2026-10-06','Packing')",
+        [shipment, org],
+      );
+      await db.query(
+        "insert into shipment_pallets(id,organization_id,shipment_id,pallet_id,status) values($1,$2,$3,$4,'Cancelado')",
+        [crypto.randomUUID(), org, shipment, f.id],
+      );
+      await db.exec("set role authenticated");
+      await unchangedRejected(
+        () => correct(f.id, fields, "Verificado", f.rev),
+        "expedición",
+      );
+      await unchangedRejected(
+        () => cancel(f.id, "Verificado", f.rev),
+        "expedición",
+      );
+    } finally {
+      await db.exec("rollback");
+    }
+  });
+
+  it("reserva ambas RPC a administrador/gestor, sin permisos directos, anónimos o perfiles inactivos", async () => {
+    const f = await fixture();
+    try {
+      const definitions = await db.query<{
+        schema: string;
+        name: string;
+        definer: boolean;
+        config: string[];
+      }>(
+        "select n.nspname as schema,p.proname as name,p.prosecdef as definer,p.proconfig as config from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname in ('correct_pallet','cancel_pallet')",
+      );
+      expect(definitions.rows).toHaveLength(4);
+      for (const entry of definitions.rows) {
+        expect(entry.definer).toBe(entry.schema === "agronorte_private");
+        expect(entry.config).toContain('search_path=""');
+      }
+      for (const role of [
+        "packing",
+        "recepcion",
+        "pesaje",
+        "auditor",
+        "destinatario",
+      ]) {
+        await db.exec("reset role");
+        await db.query("update profiles set role=$1 where user_id=$2", [
+          role,
+          user,
+        ]);
+        await db.exec("set role authenticated");
+        await unchangedRejected(
+          () => correct(f.id, fields, "Verificado", f.rev),
+          "Solo administrador",
+        );
+        await unchangedRejected(
+          () => cancel(f.id, "Verificado", f.rev),
+          "Solo administrador",
+        );
+      }
+      await db.exec("reset role");
+      await db.query("update profiles set role='gestor' where user_id=$1", [
+        user,
+      ]);
+      await db.exec("set role authenticated");
+      await correct(
+        f.id,
+        { ...fields, notes: "Validado por gestor" },
+        "Gestor confirmó",
+        f.rev,
+      );
+      await cancel(f.id, "Gestor confirmó duplicación", f.rev + 1);
+      await unchangedRejected(
+        () => db.query("update pallets set net_kg=1 where id=$1", [f.id]),
+        "permission denied",
+      );
+      await actingAs(null, "anon");
+      await unchangedRejected(
+        () => cancel(f.id, "Verificado", f.rev + 2),
+        "permission denied",
+      );
+      await actingAs(null);
+      await unchangedRejected(
+        () => correct(f.id, fields, "Verificado", f.rev + 2),
+        "Inicie sesión",
+      );
+      await actingAs(unknownUser);
+      await unchangedRejected(
+        () => cancel(f.id, "Verificado", f.rev + 2),
+        "Solo administrador",
+      );
+      await actingAs(user);
+      await db.exec("reset role");
+      await db.query("update profiles set status='Inactivo' where user_id=$1", [
+        user,
+      ]);
+      await db.exec("set role authenticated");
+      await unchangedRejected(
+        () => cancel(f.id, "Verificado", f.rev + 2),
+        "Solo administrador",
+      );
+    } finally {
+      await db.exec("rollback");
+      await actingAs(user);
+    }
+  });
+
+  it("impide cancelación sin motivo por sincronización antigua, creación cerrada y restauración desde caché", async () => {
+    const f = await fixture();
+    try {
+      const before = await remote();
+      const oldPayload = structuredClone(before);
+      oldPayload.pallets.find((p) => p.id === f.id)!.status = "Cancelado";
+      for (const role of ["administrador", "packing"]) {
+        await db.exec("reset role");
+        await db.query("update profiles set role=$1 where user_id=$2", [
+          role,
+          user,
+        ]);
+        await db.exec("set role authenticated");
+        await unchangedRejected(
+          () => sync(oldPayload, f.rev),
+          "cancelación supervisada",
+        );
+      }
+      await db.exec("reset role");
+      await db.query(
+        "update profiles set role='administrador' where user_id=$1",
+        [user],
+      );
+      await db.exec("set role authenticated");
+      for (const status of ["Cancelado", "Expedido"]) {
+        const next = structuredClone(before);
+        const id = crypto.randomUUID();
+        next.pallets.push({
+          ...next.pallets.find((p) => p.id === f.id)!,
+          id,
+          code: "CREACION-" + id,
+          token: crypto.randomUUID(),
+          status,
+        });
+        await unchangedRejected(() => sync(next, f.rev), "iniciar activo");
+      }
+      await correct(
+        f.id,
+        { ...fields, net_kg: 450 },
+        "Balanza confirmada",
+        f.rev,
+      );
+      await unchangedRejected(() => sync(before, f.rev), "Conflicto");
+      await unchangedRejected(
+        () => sync(before, f.rev + 1),
+        "reversión supervisada",
+      );
+      const corrected = await remote();
+      await cancel(f.id, "Duplicado", f.rev + 1);
+      await unchangedRejected(() => sync(corrected, f.rev + 1), "Conflicto");
+      await unchangedRejected(
+        () => sync(corrected, f.rev + 2),
+        "Pallet cerrado",
+      );
+      await unchangedRejected(
+        () =>
+          db.query("select public.sync_workspace($1::jsonb,null)", [
+            JSON.stringify(corrected),
+          ]),
+        "Conflicto",
+      );
+      const noRevision = await db.query<{ value: Record<string, boolean> }>(
+        "select public.sandia_features() as value",
+      );
+      expect(noRevision.rows[0].value).toHaveProperty(
+        "pallet_corrections",
+        true,
+      );
     } finally {
       await db.exec("rollback");
     }
