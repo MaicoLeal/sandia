@@ -1,4 +1,4 @@
-import type { Data, Pallet } from "../types";
+import type { Data, Pallet, PalletExportLabel } from "../types";
 import { dateLabel, kg, origin } from "../domain";
 
 export const SENAVE_DECLARATION =
@@ -20,6 +20,35 @@ export interface PalletLabelData {
 }
 const join = (values: (string | null | undefined)[]) =>
   [...new Set(values.map((v) => v?.trim()).filter(Boolean))].join(" / ");
+export function palletLabelEditValues(
+  data: Data,
+  pallet: Pallet,
+): PalletExportLabel {
+  const sources = data.pallet_items
+    .filter((item) => item.pallet_id === pallet.id)
+    .map((item) => origin(data, item.reception_id));
+  const fields = pallet.metadata?.export_label;
+  const harvestDates = [
+    ...new Set(
+      sources.map((source) => source.lot?.harvest_date).filter(Boolean),
+    ),
+  ];
+  return {
+    ...fields,
+    producer_code:
+      fields?.producer_code?.trim() ||
+      join(sources.map((source) => source.producer?.metadata?.export_code)),
+    origin:
+      fields?.origin?.trim() ||
+      join(sources.map((source) => source.producer?.metadata?.export_origin)),
+    harvest_date:
+      fields?.harvest_date ||
+      (harvestDates.length === 1 &&
+      sources.every((source) => Boolean(source.lot?.harvest_date))
+        ? harvestDates[0]
+        : null),
+  };
+}
 export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
   const sources = data.pallet_items
     .filter((item) => item.pallet_id === pallet.id)

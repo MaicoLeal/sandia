@@ -160,6 +160,7 @@ export interface Workspace {
     reception_edit?: boolean;
     recipient_access?: boolean;
     label_export_data?: boolean;
+    label_destination_edit?: boolean;
   };
   needsRefresh?: boolean;
   data: Data;

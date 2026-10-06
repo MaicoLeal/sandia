@@ -25,112 +25,179 @@ export function useWorkspace() {
   const lock = useRef(false);
   const epoch = useRef(0);
   const identity = useRef<string | null | undefined>(undefined);
-  const load = useCallback(async () => {
-    const request = ++epoch.current;
-    const current = () => request === epoch.current;
-    setWorkspace(null);
-    setRecipientProfile(null);
-    setNeedsLogin(false);
-    setBusy(false);
-    setError("");
-    try {
-      await removeLegacyDemo();
-      const session = supabase ? await supabase.auth.getSession() : null;
-      if (!current()) return;
-      identity.current = session?.data.session?.user.id ?? null;
-      if (session?.data.session) {
-        setNeedsLogin(false);
-        const key = "cloud:" + session.data.session.user.id;
-        const cached = await readWorkspace(key);
-        if (!current()) return;
-        let currentProfile: Profile | null = null;
-        if (navigator.onLine) {
-          const profile = await loadProfile();
-          if (!current()) return;
-          if (profile.user_id !== session.data.session.user.id) return;
-          if (profile.role === "destinatario") {
-            setWorkspace(null);
-            setRecipientProfile(profile);
-            return;
-          }
-          currentProfile = profile;
-          if (cached && cached.organizationId !== profile.organization_id)
-            throw new Error(
-              "La organización de la cuenta cambió. Contacte al administrador antes de sincronizar los registros pendientes.",
-            );
-        }
-        setRecipientProfile(null);
-        if (cached?.profile?.role === "destinatario") {
-          setWorkspace(null);
-          throw new Error(
-            "Conecte a internet para consultar los pallets autorizados.",
-          );
-        }
-        if (cached) {
-          if (!current()) return;
-          const verifiedCache = currentProfile
-            ? { ...cached, profile: currentProfile }
-            : cached;
-          if (currentProfile) {
-            await saveWorkspace(key, verifiedCache);
-            if (!current()) return;
-          }
-          setWorkspace(verifiedCache);
-          if (navigator.onLine && !cached.pending) {
-            const remote = await loadRemote();
-            if (
-              !current() ||
-              remote.profile?.user_id !== session.data.session.user.id
-            )
-              return;
-            await saveWorkspace(key, remote);
-            if (!current()) return;
-            setWorkspace(remote);
-          }
-          return;
-        }
-        const remote = await loadRemote();
-        if (
-          !current() ||
-          remote.profile?.user_id !== session.data.session.user.id
-        )
-          return;
-        await saveWorkspace(key, remote);
-        if (!current()) return;
-        setWorkspace(remote);
-      } else {
-        setRecipientProfile(null);
-        if (import.meta.env.VITE_REQUIRE_AUTH === "true") {
-          setWorkspace(null);
-          setNeedsLogin(true);
-          return;
-        }
-        setNeedsLogin(false);
-        const cached = await readWorkspace(LOCAL_KEY);
-        if (!current()) return;
-        const initial = cached ?? {
-          data: emptyData(),
-          revision: 0,
-          pending: false,
-          localOnly: true,
-          organizationId: LOCAL_ORG,
-          profile: null,
-        };
-        await saveWorkspace(LOCAL_KEY, initial);
-        if (!current()) return;
-        setWorkspace(initial);
-      }
-    } catch (e) {
-      if (!current()) return;
+  const load = useCallback(
+    async (
+      requireRemote = false,
+      expectedScope?: { userId: string; organizationId: string },
+    ) => {
+      const request = ++epoch.current;
+      const accessChanged = () =>
+        new WorkspaceAccessError(
+          "Su sesión o acceso cambió. Abra nuevamente el pallet antes de editar o imprimir la etiqueta.",
+        );
+      const current = () => {
+        const valid = request === epoch.current;
+        if (!valid && requireRemote) throw accessChanged();
+        return valid;
+      };
       setWorkspace(null);
       setRecipientProfile(null);
-      setError(
-        e instanceof Error
-          ? e.message
-          : "No se pudo abrir el almacenamiento local.",
-      );
-    }
-  }, []);
+      setNeedsLogin(false);
+      setBusy(false);
+      setError("");
+      try {
+        if (requireRemote && !expectedScope) throw accessChanged();
+        await removeLegacyDemo();
+        const session = supabase ? await supabase.auth.getSession() : null;
+        if (!current()) return;
+        if (
+          requireRemote &&
+          session?.data.session?.user.id !== expectedScope?.userId
+        )
+          throw accessChanged();
+        identity.current = session?.data.session?.user.id ?? null;
+        if (session?.data.session) {
+          setNeedsLogin(false);
+          const key = "cloud:" + session.data.session.user.id;
+          let cached = await readWorkspace(key);
+          if (!current()) return;
+          if (requireRemote) {
+            if (cached?.pending)
+              throw new Error(
+                "Sincronice los registros pendientes antes de actualizar la etiqueta.",
+              );
+            if (cached) {
+              cached = { ...cached, needsRefresh: true };
+              await saveWorkspace(key, cached);
+              if (!current()) return;
+            }
+            if (!navigator.onLine)
+              throw new Error(
+                "Los datos se guardaron en el servidor. Conéctese y sincronice para confirmar la etiqueta antes de imprimir.",
+              );
+          }
+          let currentProfile: Profile | null = null;
+          if (navigator.onLine) {
+            const profile = await loadProfile();
+            if (!current()) return;
+            if (
+              requireRemote &&
+              (profile.user_id !== expectedScope?.userId ||
+                profile.organization_id !== expectedScope?.organizationId ||
+                profile.role === "destinatario")
+            )
+              throw accessChanged();
+            if (profile.user_id !== session.data.session.user.id) return;
+            if (profile.role === "destinatario") {
+              setWorkspace(null);
+              setRecipientProfile(profile);
+              return;
+            }
+            currentProfile = profile;
+            if (cached && cached.organizationId !== profile.organization_id)
+              throw new Error(
+                "La organización de la cuenta cambió. Contacte al administrador antes de sincronizar los registros pendientes.",
+              );
+          }
+          setRecipientProfile(null);
+          if (cached?.profile?.role === "destinatario") {
+            setWorkspace(null);
+            throw new Error(
+              "Conecte a internet para consultar los pallets autorizados.",
+            );
+          }
+          if (cached) {
+            if (!current()) return;
+            const verifiedCache = currentProfile
+              ? { ...cached, profile: currentProfile }
+              : cached;
+            if (currentProfile) {
+              await saveWorkspace(key, verifiedCache);
+              if (!current()) return;
+            }
+            setWorkspace(verifiedCache);
+            if (navigator.onLine && !cached.pending) {
+              const remote = await loadRemote();
+              if (
+                requireRemote &&
+                (remote.profile?.user_id !== expectedScope?.userId ||
+                  remote.profile?.organization_id !==
+                    expectedScope?.organizationId ||
+                  remote.organizationId !== expectedScope?.organizationId)
+              )
+                throw accessChanged();
+              if (
+                !current() ||
+                remote.profile?.user_id !== session.data.session.user.id
+              )
+                return;
+              await saveWorkspace(key, remote);
+              if (!current()) return;
+              setWorkspace(remote);
+            }
+            return;
+          }
+          const remote = await loadRemote();
+          if (
+            requireRemote &&
+            (remote.profile?.user_id !== expectedScope?.userId ||
+              remote.profile?.organization_id !==
+                expectedScope?.organizationId ||
+              remote.organizationId !== expectedScope?.organizationId)
+          )
+            throw accessChanged();
+          if (
+            !current() ||
+            remote.profile?.user_id !== session.data.session.user.id
+          )
+            return;
+          await saveWorkspace(key, remote);
+          if (!current()) return;
+          setWorkspace(remote);
+        } else {
+          setRecipientProfile(null);
+          if (import.meta.env.VITE_REQUIRE_AUTH === "true") {
+            setWorkspace(null);
+            setNeedsLogin(true);
+            return;
+          }
+          setNeedsLogin(false);
+          const cached = await readWorkspace(LOCAL_KEY);
+          if (!current()) return;
+          const initial = cached ?? {
+            data: emptyData(),
+            revision: 0,
+            pending: false,
+            localOnly: true,
+            organizationId: LOCAL_ORG,
+            profile: null,
+          };
+          await saveWorkspace(LOCAL_KEY, initial);
+          if (!current()) return;
+          setWorkspace(initial);
+        }
+      } catch (e) {
+        if (request !== epoch.current) {
+          if (requireRemote) throw accessChanged();
+          return;
+        }
+        setWorkspace(null);
+        setRecipientProfile(null);
+        setError(
+          e instanceof Error
+            ? e.message
+            : "No se pudo abrir el almacenamiento local.",
+        );
+        if (requireRemote) {
+          if (e instanceof WorkspaceAccessError) throw e;
+          throw new Error(
+            "No se pudo confirmar la etiqueta guardada. Conéctese y sincronice antes de imprimir.",
+          );
+        }
+      }
+    },
+    [],
+  );
   useEffect(() => {
     const invalidate = () => {
       ++epoch.current;

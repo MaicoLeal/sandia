@@ -8,6 +8,7 @@ import { seed } from "./test-fixtures";
 import type { Pallet } from "./types";
 import {
   palletLabelData,
+  palletLabelEditValues,
   palletLabelDeclaration,
   palletLabelRows,
   SENAVE_DECLARATION,
@@ -43,6 +44,60 @@ function fixture() {
 }
 
 describe("datos de la etiqueta de exportación", () => {
+  it("prepara edición con los datos reales heredados y fechas ISO, sin asumir envasado ni AFIDI", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      export_code: " SENAVE-123 ",
+      export_origin: " San Pedro ",
+    };
+    expect(palletLabelEditValues(data, pallet)).toMatchObject({
+      producer_code: "SENAVE-123",
+      origin: "San Pedro",
+      harvest_date: "2026-10-01",
+    });
+    expect(palletLabelEditValues(data, pallet).packaged_date).toBeUndefined();
+    expect(palletLabelEditValues(data, pallet).afidi).toBeUndefined();
+    data.field_lots[0].harvest_date = null;
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+  });
+  it("conserva datos específicos y requiere cosecha explícita si un pallet mezcla fechas", () => {
+    const { data, pallet } = fixture();
+    const secondLot = {
+      ...data.field_lots[0],
+      ...base(pallet.organization_id),
+      harvest_date: "2026-10-02",
+    };
+    data.field_lots.push(secondLot);
+    const secondReception = {
+      ...data.receptions[0],
+      ...base(pallet.organization_id),
+      lot_id: secondLot.id,
+    };
+    data.receptions.push(secondReception);
+    data.pallet_items.push({
+      ...base(pallet.organization_id),
+      pallet_id: pallet.id,
+      reception_id: secondReception.id,
+      kg: 1,
+    });
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    pallet.metadata = {
+      export_label: {
+        origin: " Origin confirmada ",
+        producer_code: " CODE ",
+        harvest_date: "2026-09-29",
+        packaged_date: "2026-10-02",
+        afidi: "AFIDI-123",
+      },
+    };
+    expect(palletLabelEditValues(data, pallet)).toMatchObject({
+      origin: "Origin confirmada",
+      producer_code: "CODE",
+      harvest_date: "2026-09-29",
+      packaged_date: "2026-10-02",
+      afidi: "AFIDI-123",
+    });
+  });
   it("usa el peso neto del pallet, aunque la recepción y el bruto sean mayores", () => {
     const { data, pallet } = fixture();
     const label = palletLabelData(data, pallet);

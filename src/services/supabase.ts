@@ -158,6 +158,28 @@ export async function updatePalletExportLabel(
         : error.message,
     );
 }
+export async function updatePalletLabelDetails(
+  palletId: string,
+  fields: PalletExportLabel,
+  destination: string | null,
+  reason: string,
+  revision: number,
+) {
+  if (!supabase) throw new Error("Supabase no configurado.");
+  const { error } = await supabase.rpc("update_pallet_label_details", {
+    target_pallet_id: palletId,
+    export_fields: fields,
+    pallet_destination: destination?.trim() ?? null,
+    correction_reason: reason.trim(),
+    expected_revision: revision,
+  });
+  if (error)
+    throw new Error(
+      error.code === "PGRST202"
+        ? "Aplique la actualización SQL de edición de etiquetas en Supabase y sincronice nuevamente."
+        : error.message,
+    );
+}
 export async function syncRemote(workspace: Workspace) {
   if (!supabase || workspace.localOnly)
     throw new Error("Inicie sesión para sincronizar los datos con Supabase.");

@@ -88,8 +88,10 @@ import {
   publicTrace,
   supabase,
   updatePalletExportLabel,
+  updatePalletLabelDetails,
 } from "./services/supabase";
 import { exportCsv, printReport, receptionRows } from "./services/reports";
+import { palletLabelEditValues } from "./services/pallet-label-data";
 import {
   applyAppUpdate,
   checkAppUpdate,
@@ -97,7 +99,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06 · Etiquetas A4";
+const appVersion = "2026.10.06-2 · Edición de etiquetas";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -399,6 +401,29 @@ function WorkspaceApp() {
     setReturnToReception(false);
     setLabel(null);
   }, []);
+  const workspaceScope = workspace
+    ? `${workspace.organizationId}:${workspace.profile?.user_id ?? "local"}`
+    : recipientProfile
+      ? `${recipientProfile.organization_id}:${recipientProfile.user_id}:destinatario`
+      : needsLogin
+        ? "signed-out"
+        : null;
+  const previousScope = useRef<string | null>(null);
+  const scopeMatches =
+    !previousScope.current || previousScope.current === workspaceScope;
+  useEffect(() => {
+    if (!workspaceScope) return;
+    if (previousScope.current && previousScope.current !== workspaceScope) {
+      close();
+      setSelectedReception(null);
+      setSelectedProducer(null);
+      setRecipientAccessOpen(false);
+      setPalletProducerId("");
+      setPalletSearch("");
+      setMessage("");
+    }
+    previousScope.current = workspaceScope;
+  }, [workspaceScope, close]);
   if (needsLogin) return <LoginScreen error={error} onError={setError} />;
   if (recipientProfile)
     return (
@@ -430,6 +455,10 @@ function WorkspaceApp() {
       </div>
     );
   const data = workspace.data;
+  const currentLabel =
+    scopeMatches && label?.organization_id === workspace.organizationId
+      ? data.pallets.find((pallet) => pallet.id === label.id)
+      : undefined;
   const scannedPallet = palletToken
     ? data.pallets.find((p) => p.token === palletToken)
     : null;
@@ -1517,7 +1546,7 @@ function WorkspaceApp() {
               weight: "Registrar pesaje",
               classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
-              edit_export: "Datos de exportación para etiqueta",
+              edit_export: "Editar etiqueta antes de imprimir",
               shipment: "Nueva expedición",
               settings: "Configuración",
             }[dialog]
@@ -2300,7 +2329,7 @@ function WorkspaceApp() {
               }}
             />
           )}
-          {dialog === "edit_export" && label && (
+          {dialog === "edit_export" && currentLabel && (
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -2310,7 +2339,9 @@ function WorkspaceApp() {
                   setLabelSaving(true);
                   try {
                     allowed("pallet");
-                    const current = data.pallets.find((p) => p.id === label.id);
+                    const current = data.pallets.find(
+                      (p) => p.id === currentLabel.id,
+                    );
                     if (
                       !current ||
                       ["Expedido", "Cancelado"].includes(current.status)
@@ -2322,17 +2353,26 @@ function WorkspaceApp() {
                         "Indique el motivo del registro o corrección.",
                       );
                     const fields = exportLabelFromForm(form);
-                    assertExportDestination(fields, current.destination);
+                    const canEditDestination =
+                      workspace.localOnly ||
+                      Boolean(workspace.features?.label_destination_edit);
+                    const destination = canEditDestination
+                      ? text(form, "label_destination")
+                      : current.destination;
+                    if (!destination)
+                      throw new Error("Indique el destino del pallet.");
+                    assertExportDestination(fields, destination);
                     if (workspace.localOnly) {
                       await commit((draft) => {
                         const pallet = draft.pallets.find(
-                          (p) => p.id === label.id,
+                          (p) => p.id === currentLabel.id,
                         )!;
                         const before = structuredClone(pallet);
                         pallet.metadata = {
                           ...pallet.metadata,
                           export_label: fields,
                         };
+                        pallet.destination = destination;
                         pallet.updated_at = now();
                         record(
                           draft,
@@ -2357,16 +2397,35 @@ function WorkspaceApp() {
                         throw new Error(
                           "Sincronice primero para conservar los registros pendientes.",
                         );
-                      await updatePalletExportLabel(
-                        current.id,
-                        fields,
-                        reason,
-                        workspace.revision,
-                      );
-                      await reload();
+                      if (canEditDestination) {
+                        await updatePalletLabelDetails(
+                          current.id,
+                          fields,
+                          destination,
+                          reason,
+                          workspace.revision,
+                        );
+                      } else {
+                        await updatePalletExportLabel(
+                          current.id,
+                          fields,
+                          reason,
+                          workspace.revision,
+                        );
+                      }
+                      if (!workspace.profile)
+                        throw new Error(
+                          "Su sesión cambió. Abra nuevamente el pallet.",
+                        );
+                      await reload(true, {
+                        userId: workspace.profile.user_id,
+                        organizationId: workspace.organizationId,
+                      });
                     }
                     setDialog(null);
-                    setMessage("Datos de exportación guardados con historial.");
+                    setMessage(
+                      "Etiqueta guardada con historial. Revise la vista previa antes de imprimir.",
+                    );
                   } catch (problem) {
                     setError(
                       problem instanceof Error
@@ -2379,23 +2438,81 @@ function WorkspaceApp() {
                 })();
               }}
             >
+              <div className="setting-info">
+                <FileText />
+                <div>
+                  <strong>{currentLabel.code}</strong>
+                  <p>{kg(currentLabel.net_kg)} kg netos · Sandía</p>
+                  <p className="hint">
+                    El peso y los códigos de trazabilidad provienen del registro
+                    del pallet.
+                  </p>
+                </div>
+              </div>
               <p className="hint">
-                Complete únicamente los datos confirmados para este pallet.
-                Estos datos no modifican los pesos ni el origen histórico del
-                lote.
+                Complete los datos confirmados. Al guardar, volverá a la
+                etiqueta para revisar e imprimir el modelo A4.
               </p>
+              {!exportFieldsEnabled && (
+                <div className="setting-info" role="status">
+                  <div>
+                    <strong>Edición pendiente de activar</strong>
+                    <p>
+                      El administrador debe ejecutar la actualización de
+                      etiquetas en el proyecto Supabase de este sistema.
+                      Después, cierre esta ventana y sincronice.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <Field label="Destino del pallet *">
+                <input
+                  name="label_destination"
+                  maxLength={200}
+                  required
+                  defaultValue={currentLabel.destination}
+                  readOnly={
+                    !workspace.localOnly &&
+                    !workspace.features?.label_destination_edit
+                  }
+                />
+              </Field>
+              {!workspace.localOnly &&
+                !workspace.features?.label_destination_edit && (
+                  <p className="hint">
+                    La edición del destino requiere la actualización de
+                    etiquetas del administrador.
+                  </p>
+                )}
               <ExportLabelFields
-                value={
-                  data.pallets.find((p) => p.id === label.id)?.metadata
-                    ?.export_label
-                }
+                value={palletLabelEditValues(data, currentLabel)}
               />
               <Field label="Motivo del registro o corrección *">
-                <textarea name="export_reason" required />
+                <textarea
+                  name="export_reason"
+                  required
+                  maxLength={1000}
+                  placeholder="Ej.: completar AFIDI y fecha de envasado"
+                />
               </Field>
-              <Submit disabled={busy || labelSaving}>
-                {labelSaving ? "Guardando…" : "Guardar datos de etiqueta"}
+              <Submit
+                disabled={
+                  busy ||
+                  labelSaving ||
+                  !exportFieldsEnabled ||
+                  (!workspace.localOnly &&
+                    (!online || workspace.pending || workspace.needsRefresh))
+                }
+              >
+                {labelSaving ? "Guardando…" : "Guardar y ver etiqueta"}
               </Submit>
+              {!workspace.localOnly &&
+                (!online || workspace.pending || workspace.needsRefresh) && (
+                  <p className="hint">
+                    Conéctese y sincronice los registros para guardar la
+                    etiqueta.
+                  </p>
+                )}
               <button
                 type="button"
                 className="button secondary full"
@@ -2681,7 +2798,7 @@ function WorkspaceApp() {
             onClose={() => setRecipientAccessOpen(false)}
           />
         )}
-      {label && dialog !== "edit_export" && (
+      {currentLabel && dialog !== "edit_export" && (
         <Modal title="Etiqueta y QR de pallet" onClose={close}>
           <AppUpdateControls
             online={online}
@@ -2689,7 +2806,7 @@ function WorkspaceApp() {
           />
           <Label
             data={data}
-            pallet={data.pallets.find((p) => p.id === label.id) ?? label}
+            pallet={currentLabel}
             pending={
               !workspace.localOnly &&
               Boolean(workspace.pending || workspace.needsRefresh)
@@ -2698,12 +2815,13 @@ function WorkspaceApp() {
             online={online}
             syncError={error}
             onSync={sync}
+            editActivationPending={!exportFieldsEnabled}
             onEditExport={
               can(role, "pallet") &&
-              !["Expedido", "Cancelado"].includes(
-                (data.pallets.find((p) => p.id === label.id) ?? label).status,
-              ) &&
-              exportFieldsEnabled
+              !["Expedido", "Cancelado"].includes(currentLabel.status) &&
+              !data.shipment_pallets.some(
+                (item) => item.pallet_id === currentLabel.id,
+              )
                 ? () => {
                     setError("");
                     setDialog("edit_export");
@@ -2720,7 +2838,11 @@ function WorkspaceApp() {
                   "Sincronice antes de imprimir los códigos definitivos de lote y pallet.",
                 );
               await commit((d) => {
-                const p = d.pallets.find((p) => p.id === label.id)!;
+                const p = d.pallets.find((p) => p.id === currentLabel.id);
+                if (!p)
+                  throw new Error(
+                    "Abra nuevamente el pallet antes de imprimir.",
+                  );
                 const before = structuredClone(p);
                 if (p.status === "En armado") p.status = "Etiquetado";
                 p.updated_at = now();

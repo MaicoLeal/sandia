@@ -1642,6 +1642,15 @@ th {
 .app-update-controls .hint {
   margin: 8px 0;
 }
+@media (max-width: 640px) {
+  .label-format-note {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .label-edit-button {
+    width: 100%;
+  }
+}
 @media print {
   body {
     background: #fff;

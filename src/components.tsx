@@ -6,7 +6,7 @@ import type {
   CSSProperties,
 } from "react";
 import { flushSync } from "react-dom";
-import { X, Printer, Download, CheckCircle2, Leaf } from "lucide-react";
+import { X, Printer, Download, CheckCircle2, Leaf, Pencil } from "lucide-react";
 import QRCode from "qrcode";
 import type { Data, Pallet } from "./types";
 import {
@@ -126,6 +126,7 @@ export function Label({
   syncError = "",
   onSync,
   onEditExport,
+  editActivationPending = false,
 }: {
   pallet: Pallet;
   data: Data;
@@ -136,6 +137,7 @@ export function Label({
   syncError?: string;
   onSync?: () => Promise<void>;
   onEditExport?: () => void;
+  editActivationPending?: boolean;
 }) {
   const [qr, setQr] = useState("");
   const [error, setError] = useState("");
@@ -205,14 +207,21 @@ export function Label({
         </p>
         {onEditExport && (
           <button
-            className="button secondary"
+            className="button primary label-edit-button"
             disabled={busy || preparingPdf}
             onClick={onEditExport}
           >
-            Datos de la etiqueta
+            <Pencil size={18} />
+            Editar etiqueta
           </button>
         )}
       </div>
+      {onEditExport && editActivationPending && (
+        <p className="hint no-print">
+          Puede consultar los campos pendientes. Para guardar, el administrador
+          debe activar la actualización de etiquetas en Supabase.
+        </p>
+      )}
       <div className="print-label export-label">
         <header className="export-label-head">
           <img
