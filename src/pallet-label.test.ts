@@ -161,6 +161,25 @@ describe("datos de la etiqueta de exportación", () => {
     });
   });
 
+  it("muestra el AFIDI confirmado en la edición y la etiqueta sin asignarlo a otros pallets", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = { export_label: { afidi: "1571652" } };
+    expect(palletLabelEditValues(data, pallet).afidi).toBe("1571652");
+    expect(palletLabelRows(palletLabelData(data, pallet))).toContainEqual({
+      title: "N.º DE AFIDI",
+      value: "1571652",
+    });
+    const otherPallet: Pallet = {
+      ...pallet,
+      ...base(pallet.organization_id, "En armado"),
+      code: "PAL-OTHER",
+      token: "other-public-token",
+      metadata: null,
+    };
+    expect(palletLabelEditValues(data, otherPallet).afidi).toBeUndefined();
+    expect(palletLabelData(data, otherPallet).afidi).toBe("No informado");
+  });
+
   it("incluye todas las procedencias sin repetir productor, origen, lote o fecha", () => {
     const { data, pallet } = fixture();
     const organizationId = pallet.organization_id;
@@ -280,7 +299,9 @@ describe("PDF A4 horizontal del pallet", () => {
     "genera una única página de 297 × 210 mm con QR y datos (programa %s)",
     (senaveProgram) => {
       const { data, pallet } = fixture();
-      pallet.metadata = { export_label: { senave_program: senaveProgram } };
+      pallet.metadata = {
+        export_label: { senave_program: senaveProgram, afidi: "1571652" },
+      };
       const pdf = createPalletLabelPdf(palletLabelData(data, pallet), assets);
       expect(pdf.getNumberOfPages()).toBe(1);
       expect(pdf.internal.pageSize.getWidth()).toBeCloseTo(297, 1);
@@ -300,6 +321,7 @@ describe("PDF A4 horizontal del pallet", () => {
         .join("\n");
       expect(contents).toContain("PAL-TEST-390");
       expect(contents).toContain("390");
+      expect(contents).toContain("1571652");
       expect(raw).toContain("/Subtype /Image");
       expect(contents.includes("Anastrepha grandis")).toBe(senaveProgram);
     },

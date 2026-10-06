@@ -125,7 +125,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06-5 · Recepciones y tara";
+const appVersion = "2026.10.06-6 · AFIDI en etiquetas";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1642,6 +1642,13 @@ function WorkspaceApp() {
                               </strong>
                               <p>
                                 Destino: <strong>{p.destination}</strong>
+                              </p>
+                              <p className="hint">
+                                AFIDI:{" "}
+                                <strong>
+                                  {p.metadata?.export_label?.afidi?.trim() ||
+                                    "No informado"}
+                                </strong>
                               </p>
                               <p className="hint">
                                 Bruto: {kg(palletWeightDetails(p).grossKg)} kg
@@ -4240,7 +4247,12 @@ function ExportLabelFields({ value }: { value?: PalletExportLabel }) {
   return (
     <>
       <Field label="N° de AFIDI">
-        <input name="afidi" maxLength={100} defaultValue={value?.afidi} />
+        <input
+          name="afidi"
+          inputMode="numeric"
+          maxLength={100}
+          defaultValue={value?.afidi}
+        />
       </Field>
       <div className="form-grid">
         <Field label="Fecha de cosecha para esta etiqueta">
