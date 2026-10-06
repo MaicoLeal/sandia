@@ -64,6 +64,17 @@ import {
 } from "./domain";
 import { LossFields } from "./LossFields";
 import { PalletCorrection } from "./PalletCorrection";
+import { ReceptionManagement } from "./ReceptionManagement";
+import {
+  applyReceptionManagement,
+  assertReceptionManagement,
+} from "./reception-management";
+import type { ReceptionManagementValues } from "./reception-management";
+import {
+  DEFAULT_PALLET_TARE_KG,
+  palletGrossKg,
+  palletWeightDetails,
+} from "./pallet-weight";
 import { assertPalletCorrection } from "./pallet-corrections";
 import type { PalletCorrectionValues } from "./pallet-corrections";
 import { useWorkspace } from "./useWorkspace";
@@ -93,8 +104,19 @@ import {
   updatePalletExportLabel,
   updatePalletLabelDetails,
   revisePallet,
+  reviseReception,
 } from "./services/supabase";
-import { exportCsv, printReport, receptionRows } from "./services/reports";
+import {
+  exportCsv,
+  printReport,
+  receptionRows,
+  receptionWeightRows,
+} from "./services/reports";
+import {
+  palletReportRows,
+  shipmentReportRows,
+  producerAllocatedKg,
+} from "./services/operational-report-rows";
 import { palletLabelEditValues } from "./services/pallet-label-data";
 import {
   applyAppUpdate,
@@ -103,7 +125,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06-4 · Verificación de acceso";
+const appVersion = "2026.10.06-5 · Recepciones y tara";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -202,6 +224,7 @@ type Dialog =
   | "plot"
   | "reception"
   | "edit_reception"
+  | "cancel_reception"
   | "weight"
   | "classification"
   | "pallet"
@@ -390,6 +413,12 @@ function WorkspaceApp() {
   const [editingReceptionId, setEditingReceptionId] = useState<string | null>(
     null,
   );
+  const [editingReceptionRevision, setEditingReceptionRevision] = useState<
+    number | null
+  >(null);
+  const receptionSaveLock = useRef(false);
+  const [receptionSaving, setReceptionSaving] = useState(false);
+  const [showCancelledReceptions, setShowCancelledReceptions] = useState(false);
   const [label, setLabel] = useState<Pallet | null>(null);
   const [labelSaving, setLabelSaving] = useState(false);
   const [editingPalletId, setEditingPalletId] = useState<string | null>(null);
@@ -411,6 +440,7 @@ function WorkspaceApp() {
     setDialog(null);
     setEditingProducerId(null);
     setEditingReceptionId(null);
+    setEditingReceptionRevision(null);
     setReturnToReception(false);
     setLabel(null);
     setEditingPalletId(null);
@@ -436,6 +466,7 @@ function WorkspaceApp() {
       setPalletProducerId("");
       setPalletSearch("");
       setShowCancelledPallets(false);
+      setShowCancelledReceptions(false);
       setMessage("");
     }
     previousScope.current = workspaceScope;
@@ -618,9 +649,12 @@ function WorkspaceApp() {
   const editingProducer = editingProducerId
     ? data.producers.find((p) => p.id === editingProducerId)
     : null;
-  const editingReception = editingReceptionId
-    ? data.receptions.find((r) => r.id === editingReceptionId)
-    : null;
+  const editingReception =
+    scopeMatches && editingReceptionId
+      ? data.receptions.find(
+          (r) => r.id === editingReceptionId && r.organization_id === org,
+        )
+      : null;
   const editingPallet =
     scopeMatches && editingPalletId
       ? data.pallets.find(
@@ -628,7 +662,83 @@ function WorkspaceApp() {
         )
       : undefined;
   const palletCorrectionEnabled =
-    workspace.localOnly || Boolean(workspace.features?.pallet_corrections);
+    workspace.localOnly ||
+    Boolean(
+      workspace.features?.pallet_corrections && workspace.features?.pallet_tare,
+    );
+  const palletTareEnabled =
+    workspace.localOnly || Boolean(workspace.features?.pallet_tare);
+  const receptionManagementEnabled =
+    workspace.localOnly || Boolean(workspace.features?.reception_management);
+  const receptionManagementBlocked =
+    editingReceptionRevision !== workspace.revision
+      ? "Los datos cambiaron. Cierre y abra nuevamente la recepción antes de corregir."
+      : !can(role, "correct")
+        ? "Solo un administrador o gestor puede corregir o cancelar recepciones."
+        : !workspace.localOnly &&
+            (!online || workspace.pending || workspace.needsRefresh)
+          ? "Conéctese y sincronice los registros pendientes antes de corregir la recepción."
+          : "";
+  const openReceptionManagement = (id: string, action: "edit" | "cancel") => {
+    setError("");
+    setEditingReceptionId(id);
+    setEditingReceptionRevision(workspace.revision);
+    setDialog(action === "edit" ? "edit_reception" : "cancel_reception");
+  };
+  const saveReceptionManagement = async (values: ReceptionManagementValues) => {
+    if (receptionSaveLock.current) return;
+    receptionSaveLock.current = true;
+    setReceptionSaving(true);
+    setError("");
+    try {
+      allowed("correct");
+      if (receptionManagementBlocked)
+        throw new Error(receptionManagementBlocked);
+      if (!editingReception) throw new Error("Abra nuevamente la recepción.");
+      assertReceptionManagement(data, editingReception, values);
+      if (workspace.localOnly) {
+        await commit((draft) =>
+          applyReceptionManagement(
+            draft,
+            editingReception.id,
+            values,
+            record,
+            user,
+          ),
+        );
+      } else {
+        if (!receptionManagementEnabled)
+          throw new Error(
+            "Active la actualización SQL de recepciones y tara en Supabase.",
+          );
+        if (!workspace.profile) throw new Error("Inicie sesión nuevamente.");
+        await reviseReception(
+          editingReception.id,
+          values,
+          editingReceptionRevision!,
+        );
+        await reload(true, {
+          userId: workspace.profile.user_id,
+          organizationId: workspace.organizationId,
+        });
+      }
+      close();
+      setMessage(
+        values.action === "cancel"
+          ? "Recepción eliminada de los totales activos. Se conservaron los registros cancelados y el historial."
+          : "Recepción corregida. Los kg recibidos, las pérdidas y el saldo se recalcularon con historial.",
+      );
+    } catch (problem) {
+      setError(
+        problem instanceof Error
+          ? problem.message
+          : "No se pudo guardar la recepción.",
+      );
+    } finally {
+      receptionSaveLock.current = false;
+      setReceptionSaving(false);
+    }
+  };
   const palletCorrectionBlocked =
     editingPalletRevision !== workspace.revision
       ? "Los datos cambiaron desde que abrió el formulario. Ciérrelo y abra nuevamente el pallet antes de corregir."
@@ -660,6 +770,8 @@ function WorkspaceApp() {
             const materialChange =
               pallet.net_kg !== values.netKg ||
               pallet.gross_kg !== values.grossKg ||
+              (values.tareKg !== undefined &&
+                pallet.tare_kg !== values.tareKg) ||
               pallet.fruit_count !== values.fruitCount ||
               (pallet.weighed_date ?? null) !== values.weighedDate ||
               pallet.responsible !== values.responsible;
@@ -682,6 +794,7 @@ function WorkspaceApp() {
             }
             pallet.net_kg = values.netKg;
             pallet.gross_kg = values.grossKg;
+            if (values.tareKg !== undefined) pallet.tare_kg = values.tareKg;
             pallet.fruit_count = values.fruitCount;
             pallet.weighed_date = values.weighedDate;
             pallet.responsible = values.responsible;
@@ -753,7 +866,8 @@ function WorkspaceApp() {
         (r) => r.id === c.reception_id && r.status !== "Cancelado",
       ),
   );
-  const recent = [...data.receptions]
+  const recent = data.receptions
+    .filter((r) => r.status !== "Cancelado")
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);
   const receptionList = (list: Reception[]) => (
@@ -780,7 +894,11 @@ function WorkspaceApp() {
                 <strong>
                   {kg(receptionTotal(data, r.id))} <small>kg</small>
                 </strong>
-                <Badge>{o.lot?.status ?? r.status}</Badge>
+                <Badge>
+                  {r.status === "Cancelado"
+                    ? "Cancelado"
+                    : (o.lot?.status ?? r.status)}
+                </Badge>
               </span>
               <ChevronRight size={16} />
             </button>
@@ -1150,7 +1268,13 @@ function WorkspaceApp() {
                   label="Lotes pendientes"
                   value={String(
                     data.field_lots.filter(
-                      (l) => !["Expedido", "Rechazado"].includes(l.status),
+                      (l) =>
+                        !["Expedido", "Rechazado"].includes(l.status) &&
+                        (!data.receptions.some((r) => r.lot_id === l.id) ||
+                          data.receptions.some(
+                            (r) =>
+                              r.lot_id === l.id && r.status !== "Cancelado",
+                          )),
                     ).length,
                   )}
                   icon={<ClipboardList />}
@@ -1214,7 +1338,7 @@ function WorkspaceApp() {
                     <h2>Destino de la producción</h2>
                     <Truck size={20} />
                   </div>
-                  {data.pallets.length ? (
+                  {data.pallets.some((p) => p.status !== "Cancelado") ? (
                     [
                       ...new Set(
                         data.pallets
@@ -1285,7 +1409,21 @@ function WorkspaceApp() {
                 </label>
                 {newButton("Nueva recepción", "reception", "receive")}
               </div>
-              <section className="panel">{receptionList(rows)}</section>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={showCancelledReceptions}
+                  onChange={(e) => setShowCancelledReceptions(e.target.checked)}
+                />
+                Mostrar recepciones eliminadas
+              </label>
+              <section className="panel">
+                {receptionList(
+                  rows.filter(
+                    (r) => showCancelledReceptions || r.status !== "Cancelado",
+                  ),
+                )}
+              </section>
             </>
           )}
           {page === "Productores" && (
@@ -1506,14 +1644,11 @@ function WorkspaceApp() {
                                 Destino: <strong>{p.destination}</strong>
                               </p>
                               <p className="hint">
-                                Bruto:{" "}
-                                {p.gross_kg === null
-                                  ? "Sin informar"
-                                  : kg(p.gross_kg) + " kg"}{" "}
-                                · Tara:{" "}
-                                {p.gross_kg === null
-                                  ? "Sin tara registrada"
-                                  : kg(p.gross_kg - p.net_kg) + " kg"}
+                                Bruto: {kg(palletWeightDetails(p).grossKg)} kg
+                                {palletWeightDetails(p).grossCalculated
+                                  ? " (calculado)"
+                                  : ""}{" "}
+                                · Tara: {kg(palletWeightDetails(p).tareKg)} kg
                               </p>
                               <div className="row">
                                 <button
@@ -1752,7 +1887,8 @@ function WorkspaceApp() {
                 : "Nuevo productor",
               plot: "Nueva propiedad y parcela",
               reception: "Nueva recepción",
-              edit_reception: "Editar recepción",
+              edit_reception: "Editar recepción y pesos",
+              cancel_reception: "Eliminar recepción",
               weight: "Registrar pesaje",
               classification: "Registrar pérdidas / selección",
               pallet: "Crear pallet",
@@ -1764,7 +1900,7 @@ function WorkspaceApp() {
             }[dialog]
           }
           onClose={() => {
-            if (!palletSaveLock.current) close();
+            if (!palletSaveLock.current && !receptionSaveLock.current) close();
           }}
         >
           {error && (
@@ -2222,100 +2358,31 @@ function WorkspaceApp() {
               }}
             />
           )}
-          {dialog === "edit_reception" && editingReception && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = e.currentTarget;
-                const value = text(form, "date");
-                const responsible = text(form, "responsible");
-                const notes = text(form, "notes");
-                const reason = text(form, "reason");
-                void run(async () => {
-                  allowed("correct");
-                  if (!reason)
-                    throw new Error("Indique el motivo de la corrección.");
-                  if (!responsible)
-                    throw new Error("Ingrese el responsable de la recepción.");
-                  if (
-                    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-                    Number.isNaN(Date.parse(value)) ||
-                    new Date(value).toISOString().slice(0, 10) !== value
-                  )
-                    throw new Error("Ingrese una fecha de recepción válida.");
-                  await commit((d) => {
-                    const reception = d.receptions.find(
-                      (r) => r.id === editingReception.id,
-                    );
-                    if (!reception || reception.status === "Cancelado")
-                      throw new Error("Esta recepción no se puede editar.");
-                    if (
-                      reception.date === value &&
-                      reception.responsible === responsible &&
-                      reception.notes === notes
-                    )
-                      throw new Error("Cambie al menos un dato para guardar.");
-                    const before = structuredClone(reception);
-                    reception.date = value;
-                    reception.responsible = responsible;
-                    reception.notes = notes;
-                    reception.updated_at = now();
-                    record(
-                      d,
-                      "receptions",
-                      reception.id,
-                      "Recepción corregida",
-                      before,
-                      structuredClone(reception),
-                      reason,
-                    );
-                  });
-                }, "Cambios guardados. Se conserva el historial de la recepción.");
-              }}
-            >
-              <p>
-                <strong>
-                  {origin(data, editingReception.id).producer?.name}
-                </strong>
-                {" · Lote "}
-                {origin(data, editingReception.id).lot?.code}
-              </p>
-              <p className="hint">
-                {kg(receptionTotal(data, editingReception.id))} kg recibidos.
-                Los pesos se corrigen desde Pesajes con su justificación.
-              </p>
-              <Field label="Fecha de recepción *">
-                <input
-                  type="date"
-                  name="date"
-                  required
-                  defaultValue={editingReception.date}
-                />
-              </Field>
-              <Field label="Responsable *">
-                <input
-                  name="responsible"
-                  required
-                  defaultValue={editingReception.responsible}
-                />
-              </Field>
-              <Field label="Observaciones">
-                <textarea name="notes" defaultValue={editingReception.notes} />
-              </Field>
-              <Field label="Motivo de la corrección *">
-                <textarea
-                  name="reason"
-                  required
-                  placeholder="Explique qué datos se corrigieron y por qué"
-                />
-              </Field>
-              <p className="hint">
-                Esta fecha corresponde a la recepción. La fecha del pesaje de
-                cada pallet se mantiene en su propio registro.
-              </p>
-              <Submit disabled={busy}>Guardar cambios</Submit>
-            </form>
-          )}
+          {(dialog === "edit_reception" || dialog === "cancel_reception") &&
+            editingReception && (
+              <ReceptionManagement
+                key={
+                  org +
+                  ":" +
+                  (user ?? "local") +
+                  ":" +
+                  editingReception.id +
+                  ":" +
+                  editingReceptionRevision +
+                  ":" +
+                  dialog
+                }
+                data={data}
+                reception={editingReception}
+                action={dialog === "cancel_reception" ? "cancel" : "edit"}
+                busy={busy || receptionSaving}
+                activated={receptionManagementEnabled}
+                blockedReason={receptionManagementBlocked}
+                onSubmit={saveReceptionManagement}
+                onRefresh={sync}
+                onCancel={close}
+              />
+            )}
           {dialog === "weight" && (
             <form
               onSubmit={(e) => {
@@ -2496,13 +2563,18 @@ function WorkspaceApp() {
               actor={actor}
               busy={busy}
               exportFieldsEnabled={exportFieldsEnabled}
+              tareEnabled={palletTareEnabled}
               selectedReception={selectedReception}
               onSave={async (form) => {
                 await run(async () => {
                   allowed("pallet");
                   const id = text(form, "reception");
                   const net = number(form, "net");
-                  const gross = optionalNumber(form, "gross");
+                  if (!palletTareEnabled)
+                    throw new Error(
+                      "Active la actualización SQL de tara antes de crear pallets.",
+                    );
+                  const gross = palletGrossKg(net);
                   const count = number(form, "count");
                   const exportFields = exportLabelFromForm(form);
                   assertExportDestination(
@@ -2528,6 +2600,7 @@ function WorkspaceApp() {
                         weighed_date: text(form, "weighed_date") || null,
                         responsible: text(form, "responsible"),
                         gross_kg: gross,
+                        tare_kg: DEFAULT_PALLET_TARE_KG,
                         net_kg: net,
                         fruit_count: optionalNumber(form, "fruits"),
                         notes: text(form, "notes"),
@@ -2576,6 +2649,14 @@ function WorkspaceApp() {
                       ["Expedido", "Cancelado"].includes(current.status)
                     )
                       throw new Error("El pallet está cerrado.");
+                    if (
+                      data.shipment_pallets.some(
+                        (link) => link.pallet_id === current.id,
+                      )
+                    )
+                      throw new Error(
+                        "El pallet está vinculado a una expedición. Revise la carga antes de corregir la etiqueta.",
+                      );
                     const reason = text(form, "export_reason");
                     if (!reason)
                       throw new Error(
@@ -2597,11 +2678,17 @@ function WorkspaceApp() {
                           (p) => p.id === currentLabel.id,
                         )!;
                         const before = structuredClone(pallet);
+                        const labelChanged =
+                          pallet.destination !== destination ||
+                          JSON.stringify(
+                            pallet.metadata?.export_label ?? {},
+                          ) !== JSON.stringify(fields);
                         pallet.metadata = {
                           ...pallet.metadata,
                           export_label: fields,
                         };
                         pallet.destination = destination;
+                        if (labelChanged) pallet.status = "En armado";
                         pallet.updated_at = now();
                         record(
                           draft,
@@ -3100,7 +3187,11 @@ function WorkspaceApp() {
           onClose={() => setSelectedReception(null)}
         >
           <div className="detail-summary">
-            <Badge>{detail.lot?.status}</Badge>
+            <Badge>
+              {detail.reception.status === "Cancelado"
+                ? "Cancelado"
+                : detail.lot?.status}
+            </Badge>
             <h2>{detail.producer?.name}</h2>
             <p>
               {detail.plot
@@ -3116,88 +3207,55 @@ function WorkspaceApp() {
               {detail.reception.responsible}
             </p>
           </div>
-          {can(role, "correct") && detail.reception.status !== "Cancelado" && (
-            <button
-              className="button secondary full"
-              disabled={
-                busy ||
-                (!workspace.localOnly && !workspace.features?.reception_edit)
-              }
-              onClick={() => {
-                setError("");
-                setEditingReceptionId(detail.reception!.id);
-                setDialog("edit_reception");
-              }}
-            >
-              <Pencil size={18} />
-              Editar recepción
-            </button>
+          {detail.reception.status !== "Cancelado" && (
+            <>
+              {can(role, "correct") && (
+                <div className="producer-actions">
+                  <button
+                    className="button secondary full"
+                    disabled={busy || receptionSaving}
+                    onClick={() =>
+                      openReceptionManagement(detail.reception!.id, "edit")
+                    }
+                  >
+                    <Pencil size={18} /> Editar recepción / pesos
+                  </button>
+                  <button
+                    className="button secondary full"
+                    disabled={busy || receptionSaving}
+                    onClick={() =>
+                      openReceptionManagement(detail.reception!.id, "cancel")
+                    }
+                  >
+                    <X size={18} /> Eliminar recepción
+                  </button>
+                </div>
+              )}
+              <div className="row">
+                {newButton("Pesaje", "weight", "weigh", <Scale size={16} />)}
+                {!data.classifications.some(
+                  (c) =>
+                    c.reception_id === detail.reception?.id &&
+                    c.status !== "Cancelado",
+                ) &&
+                  newButton(
+                    "Registrar pérdidas / selección",
+                    "classification",
+                    "classify",
+                  )}
+                {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
+              </div>
+            </>
           )}
           {detail.reception.notes && (
             <p className="hint">{detail.reception.notes}</p>
           )}
-          <div className="row">
-            {newButton("Pesaje", "weight", "weigh", <Scale size={16} />)}
-            {!data.classifications.some(
-              (c) => c.reception_id === detail.reception?.id,
-            ) &&
-              newButton(
-                "Registrar pérdidas / selección",
-                "classification",
-                "classify",
-              )}
-            {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
-          </div>
-          {can(role, "correct") &&
-            detail.reception.status !== "Cancelado" &&
-            !data.classifications.some(
-              (c) => c.reception_id === detail.reception?.id,
-            ) && (
-              <button
-                className="button secondary full"
-                disabled={busy}
-                onClick={() => {
-                  const reason = window.prompt(
-                    "Motivo obligatorio para cancelar la recepción (se conserva el historial)",
-                  );
-                  if (!reason?.trim()) return;
-                  void run(() =>
-                    commit((d) => {
-                      allowed("correct");
-                      const r = d.receptions.find(
-                        (r) => r.id === detail.reception!.id,
-                      )!;
-                      const before = structuredClone(r);
-                      r.status = "Cancelado";
-                      r.notes =
-                        "Cancelación: " +
-                        reason +
-                        (r.notes ? " · " + r.notes : "");
-                      r.updated_at = now();
-                      record(
-                        d,
-                        "receptions",
-                        r.id,
-                        "Recepción cancelada",
-                        before,
-                        r,
-                        reason,
-                      );
-                    }),
-                  );
-                }}
-              >
-                Cancelar recepción con justificación
-              </button>
-            )}
-          {can(role, "correct") &&
-            !workspace.localOnly &&
-            !workspace.features?.reception_edit && (
-              <p className="hint">
-                La edición de recepción requiere habilitar la actualización del
-                sistema con el administrador.
-              </p>
-            )}
+          {detail.reception.status === "Cancelado" && (
+            <p className="hint">
+              Recepción eliminada de los totales activos. Registros conservados
+              para consulta y auditoría.
+            </p>
+          )}
           <h3>Pesajes</h3>
           <div className="weight-table">
             {data.reception_weights
@@ -3207,60 +3265,20 @@ function WorkspaceApp() {
                   <span>#{w.sequence}</span>
                   <strong>{kg(w.kg)} kg</strong>
                   <small>{w.operator}</small>
-                  {can(role, "correct") && (
-                    <button
-                      className="link"
-                      disabled={busy}
-                      onClick={() => {
-                        const input = window.prompt(
-                          "Nuevo peso en kg",
-                          String(w.kg),
-                        );
-                        if (input === null) return;
-                        const reason = window.prompt(
-                          "Justificación obligatoria",
-                        );
-                        if (!reason) return;
-                        void run(async () => {
-                          allowed("correct");
-                          const value = parseKg(input);
-                          await commit((d) => {
-                            if (
-                              d.receptions.find((r) => r.id === w.reception_id)
-                                ?.status === "Cancelado"
-                            )
-                              throw new Error("La recepción está cancelada.");
-                            if (
-                              d.classifications.some(
-                                (c) => c.reception_id === w.reception_id,
-                              )
-                            )
-                              throw new Error(
-                                "Recepción clasificada: corrija antes de clasificar o gestione una reversión supervisada.",
-                              );
-                            const row = d.reception_weights.find(
-                              (x) => x.id === w.id,
-                            )!;
-                            const before = structuredClone(row);
-                            row.kg = value;
-                            row.updated_at = now();
-                            row.correction_reason = reason;
-                            record(
-                              d,
-                              "reception_weights",
-                              row.id,
-                              "Peso corregido",
-                              before,
-                              row,
-                              reason,
-                            );
-                          });
-                        });
-                      }}
-                    >
-                      Corregir
-                    </button>
-                  )}
+                  <Badge>{w.status}</Badge>
+                  {can(role, "correct") &&
+                    w.status !== "Cancelado" &&
+                    detail.reception?.status !== "Cancelado" && (
+                      <button
+                        className="link"
+                        disabled={busy || receptionSaving}
+                        onClick={() =>
+                          openReceptionManagement(w.reception_id, "edit")
+                        }
+                      >
+                        Editar / quitar
+                      </button>
+                    )}
                 </div>
               ))}
           </div>
@@ -3274,7 +3292,7 @@ function WorkspaceApp() {
                   <strong>{kg(c.rejected_kg)} kg</strong>
                 </p>
                 <p>
-                  Calidad:{" "}
+                  Estado: {c.status} · Calidad:{" "}
                   {c.quality === null ? "Sin evaluar" : c.quality + "/5"} ·{" "}
                   {c.reason || "Sin rechazo"}
                 </p>
@@ -3326,7 +3344,8 @@ function WorkspaceApp() {
                   data.pallet_items.some(
                     (i) =>
                       i.reception_id === reception.id &&
-                      (i.pallet_id === a.entity_id ||
+                      (i.id === a.entity_id ||
+                        i.pallet_id === a.entity_id ||
                         data.shipment_pallets.some(
                           (sp) =>
                             sp.pallet_id === i.pallet_id &&
@@ -3345,12 +3364,25 @@ function WorkspaceApp() {
             className="button secondary"
             onClick={() =>
               void run(async () => {
+                const rows = receptionWeightRows(data, detail.reception!.id);
+                const headers = [
+                  "Pesaje",
+                  "Kg_registrados",
+                  "Kg_activos",
+                  "Operador",
+                  "Estado",
+                  "Motivo",
+                ];
                 printReport(
-                  "Resumen de recepción · " + detail.lot?.code,
-                  ["Pesaje", "Kg", "Operador"],
-                  data.reception_weights
-                    .filter((w) => w.reception_id === detail.reception?.id)
-                    .map((w) => [w.sequence, w.kg, w.operator]),
+                  "Resumen de recepción · " +
+                    detail.lot?.code +
+                    " · Total activo: " +
+                    kg(receptionTotal(data, detail.reception!.id)) +
+                    " kg",
+                  headers,
+                  rows.map((row) =>
+                    headers.map((header) => row[header as keyof typeof row]),
+                  ),
                 );
               }, "Resumen preparado.")
             }
@@ -3455,7 +3487,10 @@ function WorkspaceApp() {
               {kg(
                 producerPallets
                   .filter((p) => p.status !== "Cancelado")
-                  .reduce((sum, p) => sum + p.net_kg, 0),
+                  .reduce(
+                    (sum, p) => sum + producerAllocatedKg(data, p, producer.id),
+                    0,
+                  ),
               )}{" "}
               kg en pallets
             </strong>
@@ -3519,6 +3554,11 @@ function WorkspaceApp() {
             )
             .map((c) => (
               <p key={c.id}>
+                <Badge>
+                  {c.status === "Cancelado"
+                    ? "Cancelado · historial"
+                    : c.status}
+                </Badge>{" "}
                 Calidad {c.quality === null ? "Sin evaluar" : c.quality + "/5"}{" "}
                 · {kg(c.rejected_kg)} kg rechazados ·{" "}
                 {c.reason || "Sin rechazo"}
@@ -4066,6 +4106,7 @@ function PalletForm({
   busy,
   selectedReception,
   exportFieldsEnabled,
+  tareEnabled,
   onSave,
 }: {
   data: Data;
@@ -4073,9 +4114,14 @@ function PalletForm({
   busy: boolean;
   selectedReception: string | null;
   exportFieldsEnabled: boolean;
+  tareEnabled: boolean;
   onSave: (form: HTMLFormElement) => Promise<void>;
 }) {
   const [id, setId] = useState(selectedReception ?? "");
+  const [netWeight, setNetWeight] = useState("");
+  const netNumber = /^\d+(?:[.,]\d{1,2})?$/.test(netWeight.trim())
+    ? Number(netWeight.replace(",", "."))
+    : null;
   return (
     <form
       onSubmit={(e) => {
@@ -4126,12 +4172,33 @@ function PalletForm({
           <input name="destination" required defaultValue="Uruguay" />
         </Field>
         <Field label="Peso neto por pallet (kg) *">
-          <NumericInput name="net" inputMode="decimal" required />
+          <NumericInput
+            name="net"
+            inputMode="decimal"
+            required
+            value={netWeight}
+            onChange={(e) => setNetWeight(e.target.value)}
+          />
         </Field>
-        <Field label="Peso bruto por pallet (kg), si se conoce">
-          <NumericInput name="gross" inputMode="decimal" />
+        <Field label="Peso bruto calculado por pallet (kg)">
+          <NumericInput
+            name="gross"
+            inputMode="decimal"
+            readOnly
+            value={netNumber === null ? "" : palletGrossKg(netNumber)}
+          />
         </Field>
       </div>
+      <p className="hint">
+        Tara del envase: 42 kg por pallet. Ingrese solo los kg netos de sandía;
+        el bruto es neto + 42 kg.
+      </p>
+      {!tareEnabled && (
+        <p className="error">
+          Aplique la actualización SQL de recepciones y tara, y sincronice antes
+          de crear pallets.
+        </p>
+      )}
       <Field label="Fecha de pesaje del pallet (si se conoce)">
         <input type="date" name="weighed_date" />
       </Field>
@@ -4165,7 +4232,7 @@ function PalletForm({
           </p>
         )}
       </details>
-      <Submit disabled={busy}>Crear pallets</Submit>
+      <Submit disabled={busy || !tareEnabled}>Crear pallets</Submit>
     </form>
   );
 }
@@ -4254,69 +4321,15 @@ function Reports({
       includedReception(data.receptions[i].id),
     );
   if (kind === "Pallet")
-    report = data.pallets
-      .filter((p) => includeCancelledPallets || p.status !== "Cancelado")
-      .filter((p) =>
-        data.pallet_items.some(
-          (i) => i.pallet_id === p.id && includedReception(i.reception_id),
-        ),
-      )
-      .map((p) => {
-        const o = origin(
-          data,
-          data.pallet_items.find((i) => i.pallet_id === p.id)?.reception_id ??
-            "",
-        );
-        return {
-          Pallet: p.code,
-          Lote: o.lot?.code ?? "",
-          Productor: o.producer?.name ?? "",
-          Destino: p.destination,
-          Neto_kg: p.net_kg,
-          Bruto_kg: p.gross_kg ?? "Sin informar",
-          Estado: p.status,
-        };
-      });
+    report = palletReportRows(
+      data,
+      producer,
+      from,
+      to,
+      includeCancelledPallets,
+    );
   if (["Expedición", "Exportación"].includes(kind))
-    report = data.shipments
-      .filter(
-        (s) =>
-          included(s.departure) &&
-          (!producer ||
-            data.shipment_pallets.some(
-              (sp) =>
-                sp.shipment_id === s.id &&
-                data.pallet_items.some(
-                  (i) =>
-                    i.pallet_id === sp.pallet_id &&
-                    origin(data, i.reception_id).producer?.id === producer,
-                ),
-            )),
-      )
-      .flatMap((s) =>
-        data.shipment_pallets
-          .filter((sp) => sp.shipment_id === s.id)
-          .map((sp) => {
-            const p = data.pallets.find((p) => p.id === sp.pallet_id)!;
-            const o = origin(
-              data,
-              data.pallet_items.find((i) => i.pallet_id === p.id)
-                ?.reception_id ?? "",
-            );
-            return {
-              Salida: dateLabel(s.departure),
-              Destino: s.destination,
-              País: s.country,
-              Cliente: s.customer,
-              Chapa: s.plate,
-              Pallet: p.code,
-              Lote: o.lot?.code ?? "",
-              Productor: o.producer?.name ?? "",
-              Parcela: o.plot?.name ?? "",
-              Kg: p.net_kg,
-            };
-          }),
-      );
+    report = shipmentReportRows(data, producer, from, to);
   const regional = regionalLosses(data, from, to, producer);
   const threshold = Number(lossThreshold.replace(",", "."));
   const validThreshold =

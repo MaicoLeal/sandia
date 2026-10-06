@@ -71,6 +71,23 @@ function draft(
 }
 
 describe("corrección de pallets", () => {
+  it("corrige con tara 42 sumada al neto sin descontarla del peso de sandía", () => {
+    const { data, pallet } = fixture();
+    const values = parsePalletCorrection(
+      data,
+      pallet,
+      draft({ netKg: "390,25", tareKg: 42 }),
+    );
+    expect(values).toMatchObject({
+      netKg: 390.25,
+      tareKg: 42,
+      grossKg: 432.25,
+    });
+    expect(() =>
+      assertPalletCorrection(data, pallet, { ...values, grossKg: 390.25 }),
+    ).toThrow(/neto más la tara/);
+    expect(pallet.net_kg).toBe(400);
+  });
   it("admite coma decimal y conserva datos opcionales desconocidos", () => {
     const { data, pallet } = fixture();
     const values = parsePalletCorrection(

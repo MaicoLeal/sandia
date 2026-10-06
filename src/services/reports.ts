@@ -1,5 +1,5 @@
 import type { Data } from "../types";
-import { dateLabel, kg, origin, receptionTotal } from "../domain";
+import { dateLabel, kg, origin, receptionTotal, round } from "../domain";
 export function exportCsv(
   rows: Record<string, string | number>[],
   name: string,
@@ -32,16 +32,48 @@ export function exportCsv(
 export function receptionRows(data: Data) {
   return data.receptions.map((r) => {
     const o = origin(data, r.id);
+    const weights = data.reception_weights.filter(
+      (weight) => weight.reception_id === r.id,
+    );
+    const cancelled = r.status === "Cancelado";
     return {
       Fecha: dateLabel(r.date),
       Productor: o.producer?.name ?? "",
       Parcela: o.plot?.name ?? "",
       Lote: o.lot?.code ?? "",
       Kg: receptionTotal(data, r.id),
+      Pesajes_activos: cancelled
+        ? 0
+        : weights.filter((weight) => weight.status !== "Cancelado").length,
+      Kg_cancelados_historial: round(
+        weights
+          .filter((weight) => cancelled || weight.status === "Cancelado")
+          .reduce((total, weight) => total + weight.kg, 0),
+      ),
       Responsable: r.responsible,
       Estado: r.status,
     };
   });
+}
+
+/** Keep removed weights visible as history, with no contribution to active kg. */
+export function receptionWeightRows(data: Data, receptionId: string) {
+  const reception = data.receptions.find((row) => row.id === receptionId);
+  return data.reception_weights
+    .filter((weight) => weight.reception_id === receptionId)
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((weight) => {
+      const cancelled =
+        reception?.status === "Cancelado" || weight.status === "Cancelado";
+      return {
+        Pesaje: weight.sequence,
+        Kg_registrados: weight.kg,
+        Kg_activos: cancelled ? 0 : weight.kg,
+        Operador: weight.operator,
+        Estado: cancelled ? "Cancelado · historial" : weight.status,
+        Motivo: weight.correction_reason,
+      };
+    });
 }
 export function printReport(
   title: string,

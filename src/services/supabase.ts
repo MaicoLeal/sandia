@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { getFile } from "./storage";
 import type { PalletCorrectionValues } from "../pallet-corrections";
+import type { ReceptionManagementValues } from "../reception-management";
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = url && key ? createClient(url, key) : null;
@@ -204,12 +205,47 @@ export async function revisePallet(
             weighed_date: values.weighedDate,
             responsible: values.responsible.trim(),
             notes: values.notes,
+            ...(values.tareKg !== undefined ? { tare_kg: values.tareKg } : {}),
           },
         });
   if (error)
     throw new Error(
       ["PGRST202", "42883"].includes(error.code)
         ? "El administrador debe activar la actualización de correcciones de pallets en Supabase y sincronizar nuevamente."
+        : error.message,
+    );
+}
+export async function reviseReception(
+  receptionId: string,
+  values: ReceptionManagementValues,
+  revision: number,
+) {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const common = {
+    target_reception_id: receptionId,
+    correction_reason: values.reason.trim(),
+    expected_revision: revision,
+  };
+  const { error } =
+    values.action === "cancel"
+      ? await supabase.rpc("cancel_reception", {
+          ...common,
+          cancel_linked_pallets: values.confirmPallets,
+        })
+      : await supabase.rpc("correct_reception", {
+          ...common,
+          corrected_fields: {
+            date: values.date,
+            responsible: values.responsible.trim(),
+            notes: values.notes,
+            weights: values.weights,
+            classification: values.classification,
+          },
+        });
+  if (error)
+    throw new Error(
+      ["PGRST202", "42883"].includes(error.code)
+        ? "El administrador debe activar la actualización de gestión de recepciones en Supabase y sincronizar nuevamente."
         : error.message,
     );
 }

@@ -9,6 +9,11 @@ import {
 } from "./pallet-corrections";
 import type { PalletCorrectionValues } from "./pallet-corrections";
 import type { Data, Pallet } from "./types";
+import {
+  DEFAULT_PALLET_TARE_KG,
+  palletGrossKg,
+  palletWeightDetails,
+} from "./pallet-weight";
 
 export function PalletCorrection({
   data,
@@ -34,6 +39,10 @@ export function PalletCorrection({
   const [error, setError] = useState("");
   const [net, setNet] = useState(String(pallet.net_kg));
   const source = palletCorrectionSource(data, pallet);
+  const parsedNet = /^\d+(?:[.,]\d{1,2})?$/.test(net.trim())
+    ? Number(net.replace(",", "."))
+    : null;
+  const oldWeight = palletWeightDetails(pallet);
   const submitDisabled = busy || !activated || !!blockedReason;
   return (
     <form
@@ -52,6 +61,7 @@ export function PalletCorrection({
             values = parsePalletCorrection(data, pallet, {
               netKg: net,
               grossKg: value("gross"),
+              tareKg: DEFAULT_PALLET_TARE_KG,
               fruitCount: value("fruits"),
               weighedDate: value("weighed_date"),
               responsible: value("responsible"),
@@ -140,18 +150,24 @@ export function PalletCorrection({
                 aria-describedby="pallet-net-hint"
               />
             </Field>
-            <Field label="Peso bruto (kg), si se conoce">
+            <Field label="Peso bruto calculado (kg)">
               <NumericInput
                 name="gross"
-                defaultValue={pallet.gross_kg ?? ""}
-                maxLength={15}
+                value={parsedNet === null ? "" : palletGrossKg(parsedNet)}
+                readOnly
               />
             </Field>
           </div>
           <p className="hint" id="pallet-net-hint">
-            Use coma o punto para decimales. El bruto incluye la tara y debe ser
-            igual o mayor al neto.
+            Ingrese solo los kg de sandía. Tara del envase: 42 kg por pallet. El
+            bruto se calcula sumando 42 kg al neto; no se descuenta otra vez.
           </p>
+          {oldWeight.tareKg !== DEFAULT_PALLET_TARE_KG && (
+            <p className="hint">
+              Tara anterior: {kg(oldWeight.tareKg)} kg. Al guardar esta
+              corrección se registrará la tara confirmada de 42 kg y su motivo.
+            </p>
+          )}
           <div className="form-grid">
             <Field label="Cantidad de frutas, si se conoce">
               <NumericInput

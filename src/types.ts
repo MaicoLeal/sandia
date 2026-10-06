@@ -85,6 +85,7 @@ export interface Pallet extends Base {
   weighed_date?: string | null;
   responsible: string;
   gross_kg: number | null;
+  tare_kg?: number;
   net_kg: number;
   fruit_count: number | null;
   notes: string;
@@ -162,6 +163,8 @@ export interface Workspace {
     label_export_data?: boolean;
     label_destination_edit?: boolean;
     pallet_corrections?: boolean;
+    reception_management?: boolean;
+    pallet_tare?: boolean;
   };
   needsRefresh?: boolean;
   data: Data;

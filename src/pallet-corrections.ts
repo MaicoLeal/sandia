@@ -1,11 +1,13 @@
 import { available, round } from "./domain";
 import type { Data, Pallet } from "./types";
+import { palletGrossKg } from "./pallet-weight";
 
 export type PalletCorrectionValues =
   | {
       action: "edit";
       netKg: number;
       grossKg: number | null;
+      tareKg?: number;
       fruitCount: number | null;
       weighedDate: string | null;
       responsible: string;
@@ -17,6 +19,7 @@ export type PalletCorrectionValues =
 export interface PalletCorrectionDraft {
   netKg: string;
   grossKg: string;
+  tareKg?: number;
   fruitCount: string;
   weighedDate: string;
   responsible: string;
@@ -138,6 +141,16 @@ export function assertPalletCorrection(
   )
     throw new Error("El peso bruto debe ser mayor o igual al neto.");
   if (
+    values.tareKg !== undefined &&
+    (!Number.isFinite(values.tareKg) ||
+      values.tareKg < 0 ||
+      round(values.tareKg) !== values.tareKg ||
+      values.grossKg !== palletGrossKg(values.netKg, values.tareKg))
+  )
+    throw new Error(
+      "El bruto debe ser el neto más la tara, sin descontar la tara del peso de la fruta.",
+    );
+  if (
     values.fruitCount !== null &&
     (!Number.isSafeInteger(values.fruitCount) ||
       values.fruitCount < 0 ||
@@ -182,6 +195,10 @@ export function parsePalletCorrection(
     notes: draft.notes.trim(),
     reason: draft.reason.trim(),
   };
+  if (draft.tareKg !== undefined) {
+    values.tareKg = draft.tareKg;
+    values.grossKg = palletGrossKg(values.netKg, draft.tareKg);
+  }
   assertPalletCorrection(data, pallet, values);
   return values;
 }

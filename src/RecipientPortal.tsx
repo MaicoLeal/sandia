@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, RefreshCw } from "lucide-react";
 import { Badge, Brand, Empty, Field } from "./components";
-import { dateLabel, kg } from "./domain";
+import { dateLabel, day, kg } from "./domain";
 import { loadRecipientPallets, supabase } from "./services/supabase";
 import type { Profile, RecipientPallet } from "./types";
 
@@ -136,7 +136,7 @@ export function RecipientPortal({ profile }: { profile: Profile }) {
                     "Sin informar"}
                 </dd>
                 <dt>Armado</dt>
-                <dd>{dateLabel(p.assembled_at.slice(0, 10))}</dd>
+                <dd>{dateLabel(day(new Date(p.assembled_at)))}</dd>
                 <dt>Pesaje</dt>
                 <dd>
                   {p.weighed_date ? dateLabel(p.weighed_date) : "Sin informar"}
