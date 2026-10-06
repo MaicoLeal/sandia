@@ -103,7 +103,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06-3 · Corrección de pallets";
+const appVersion = "2026.10.06-4 · Verificación de acceso";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1783,6 +1783,7 @@ function WorkspaceApp() {
                 activated={palletCorrectionEnabled}
                 blockedReason={palletCorrectionBlocked}
                 onSubmit={savePalletCorrection}
+                onRefresh={sync}
                 onCancel={close}
               />
             )}

@@ -18,6 +18,7 @@ export function PalletCorrection({
   blockedReason = "",
   onSubmit,
   onCancel,
+  onRefresh,
   action,
 }: {
   data: Data;
@@ -27,6 +28,7 @@ export function PalletCorrection({
   blockedReason?: string;
   onSubmit: (values: PalletCorrectionValues) => Promise<void>;
   onCancel: () => void;
+  onRefresh?: () => Promise<void>;
   action: "edit" | "cancel";
 }) {
   const [error, setError] = useState("");
@@ -82,10 +84,22 @@ export function PalletCorrection({
         </div>
       </div>
       {!activated && (
-        <p className="error" role="status">
-          Edición pendiente de activar. El administrador debe aplicar la
-          actualización de pallets en Supabase para guardar.
-        </p>
+        <>
+          <p className="error" role="status">
+            La función de edición y cancelación aún no está confirmada para esta
+            cuenta. Si ya aplicó el SQL, sincronice para volver a verificar.
+          </p>
+          {onRefresh && (
+            <button
+              className="button full"
+              type="button"
+              disabled={busy}
+              onClick={() => void onRefresh()}
+            >
+              Sincronizar y verificar acceso
+            </button>
+          )}
+        </>
       )}
       {blockedReason && (
         <p className="error" role="status">
