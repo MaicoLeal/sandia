@@ -2,17 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import App from "./App";
+import { initializeAppUpdates } from "./services/app-update";
 import "./styles.css";
-const updateSW = registerSW({
-  onNeedRefresh() {
-    window.dispatchEvent(new Event("app-update"));
-  },
-});
-window.addEventListener("app-update-apply", () => {
-  void updateSW(true).catch(() =>
-    window.dispatchEvent(new Event("app-update-error")),
-  );
-});
+initializeAppUpdates(registerSW, { automatic: import.meta.env.PROD });
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

@@ -1629,6 +1629,19 @@ th {
     display: none;
   }
 }
+.app-update-controls {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #d9e5cc;
+  border-radius: 12px;
+  background: #eef4e6;
+}
+.app-update-controls .row {
+  flex-wrap: wrap;
+}
+.app-update-controls .hint {
+  margin: 8px 0;
+}
 @media print {
   body {
     background: #fff;

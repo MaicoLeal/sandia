@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowDownToLine,
@@ -16,6 +22,7 @@ import {
   PackageCheck,
   Pencil,
   Plus,
+  RefreshCw,
   Scale,
   Search,
   Settings,
@@ -83,6 +90,99 @@ import {
   updatePalletExportLabel,
 } from "./services/supabase";
 import { exportCsv, printReport, receptionRows } from "./services/reports";
+import {
+  applyAppUpdate,
+  checkAppUpdate,
+  getAppUpdateSnapshot,
+  subscribeAppUpdate,
+} from "./services/app-update";
+
+const appVersion = "2026.10.06 · Etiquetas A4";
+
+function AppUpdateControls({
+  blockedReason = "",
+  alwaysVisible = false,
+  online = true,
+}: {
+  blockedReason?: string;
+  alwaysVisible?: boolean;
+  online?: boolean;
+}) {
+  const update = useSyncExternalStore(subscribeAppUpdate, getAppUpdateSnapshot);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState("");
+  if (!alwaysVisible && !update.available && !update.error) return null;
+  return (
+    <section
+      className="app-update-controls no-print"
+      aria-label="Actualización de la aplicación"
+    >
+      <strong>
+        {update.available
+          ? "Nueva versión disponible"
+          : "Versión de la aplicación"}
+      </strong>
+      <p className="hint">{appVersion}</p>
+      <p className="hint" role="status">
+        {update.checking
+          ? "Buscando una nueva versión…"
+          : update.available
+            ? "Actualice para usar los cambios más recientes, incluidas las etiquetas."
+            : update.checked
+              ? "Verificación completada: no hay una actualización pendiente."
+              : "Verifique la versión si todavía aparece una etiqueta anterior."}
+      </p>
+      {(update.error || applyError) && (
+        <p className="error" role="alert">
+          {update.error || applyError}
+        </p>
+      )}
+      <div className="row">
+        <button
+          type="button"
+          className="button secondary"
+          disabled={!online || update.checking || applying}
+          onClick={() => void checkAppUpdate()}
+        >
+          <RefreshCw size={18} />
+          {update.checking ? "Verificando…" : "Verificar actualización"}
+        </button>
+        {update.available && (
+          <button
+            type="button"
+            className="button primary"
+            disabled={
+              Boolean(blockedReason) || !online || applying || update.checking
+            }
+            onClick={() => {
+              setApplyError("");
+              setApplying(true);
+              void applyAppUpdate()
+                .catch((e) =>
+                  setApplyError(
+                    e instanceof Error
+                      ? e.message
+                      : "No se pudo actualizar la aplicación.",
+                  ),
+                )
+                .finally(() => setApplying(false));
+            }}
+          >
+            {applying ? "Actualizando…" : "Actualizar aplicación"}
+          </button>
+        )}
+      </div>
+      {update.available && blockedReason && (
+        <p className="hint">{blockedReason}</p>
+      )}
+      {!online && (
+        <p className="hint">
+          Conecte el celular a internet para verificar la versión.
+        </p>
+      )}
+    </section>
+  );
+}
 
 type Page =
   | "Inicio"
@@ -292,7 +392,6 @@ function WorkspaceApp() {
   );
   const [palletProducerId, setPalletProducerId] = useState("");
   const [palletSearch, setPalletSearch] = useState("");
-  const [updateAvailable, setUpdateAvailable] = useState(false);
   const close = useCallback(() => {
     setDialog(null);
     setEditingProducerId(null);
@@ -300,19 +399,6 @@ function WorkspaceApp() {
     setReturnToReception(false);
     setLabel(null);
   }, []);
-  useEffect(() => {
-    const fn = () => setUpdateAvailable(true);
-    const failed = () =>
-      setError(
-        "No se pudo actualizar. Guarde su trabajo y vuelva a abrir la aplicación.",
-      );
-    window.addEventListener("app-update", fn);
-    window.addEventListener("app-update-error", failed);
-    return () => {
-      window.removeEventListener("app-update", fn);
-      window.removeEventListener("app-update-error", failed);
-    };
-  }, [setError]);
   if (needsLogin) return <LoginScreen error={error} onError={setError} />;
   if (recipientProfile)
     return (
@@ -775,22 +861,18 @@ function WorkspaceApp() {
               </button>
             </div>
           )}
-          {updateAvailable && (
-            <div className="row update-notice">
-              <p className="hint">
-                Hay una nueva versión. Guarde su trabajo antes de actualizar.
-              </p>
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={() =>
-                  window.dispatchEvent(new Event("app-update-apply"))
-                }
-              >
-                Actualizar aplicación
-              </button>
-            </div>
-          )}
+          <AppUpdateControls
+            online={online}
+            blockedReason={
+              busy
+                ? "Espere a que termine la operación."
+                : workspace.pending || workspace.needsRefresh
+                  ? "Sincronice los registros antes de actualizar."
+                  : (dialog && dialog !== "settings") || label
+                    ? "Guarde el formulario y cierre la ventana abierta antes de actualizar."
+                    : ""
+            }
+          />
           <div className="page-heading">
             <div>
               <p className="eyebrow">DEL CAMPO AL DESTINO</p>
@@ -2472,6 +2554,17 @@ function WorkspaceApp() {
           )}
           {dialog === "settings" && (
             <>
+              <AppUpdateControls
+                alwaysVisible
+                online={online}
+                blockedReason={
+                  busy
+                    ? "Espere a que termine la operación."
+                    : workspace.pending || workspace.needsRefresh
+                      ? "Cierre esta ventana y sincronice los registros antes de actualizar."
+                      : ""
+                }
+              />
               <button
                 className="button secondary full"
                 disabled={busy}
@@ -2590,6 +2683,10 @@ function WorkspaceApp() {
         )}
       {label && dialog !== "edit_export" && (
         <Modal title="Etiqueta y QR de pallet" onClose={close}>
+          <AppUpdateControls
+            online={online}
+            blockedReason="Cierre la etiqueta y guarde cualquier formulario antes de actualizar la aplicación."
+          />
           <Label
             data={data}
             pallet={data.pallets.find((p) => p.id === label.id) ?? label}
