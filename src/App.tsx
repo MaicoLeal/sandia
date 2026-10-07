@@ -135,7 +135,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-4 · Código del productor SPE/CAN";
+const appVersion = "2026.10.07-5 · Fecha de envasado";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -4405,6 +4405,7 @@ function ExportLabelFields({
   value?: PalletExportLabel;
   importerEnabled: boolean;
 }) {
+  const [packagedDate, setPackagedDate] = useState(value?.packaged_date ?? "");
   return (
     <>
       <Field label="Importador (razón social)">
@@ -4448,17 +4449,28 @@ function ExportLabelFields({
             defaultValue={value?.harvest_date ?? ""}
           />
         </Field>
-        <Field label="Fecha de envasado confirmada">
-          <input
-            type="date"
-            name="packaged_date"
-            defaultValue={value?.packaged_date ?? ""}
-          />
-        </Field>
+        <div>
+          <Field label="Fecha de envasado confirmada">
+            <input
+              type="date"
+              name="packaged_date"
+              value={packagedDate}
+              onChange={(event) => setPackagedDate(event.target.value)}
+            />
+          </Field>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setPackagedDate(day())}
+          >
+            Usar fecha de hoy
+          </button>
+        </div>
       </div>
       <p className="hint">
         Si deja la cosecha vacía, se muestra la fecha registrada en el lote,
-        cuando exista. El envasado se completa por separado.
+        cuando exista. La fecha de envasado se confirma por separado; el botón
+        usa la fecha actual de Paraguay.
       </p>
       <Field label="Código del productor para esta etiqueta (opcional)">
         <input
