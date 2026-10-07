@@ -139,7 +139,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-9 · Recuperación de sincronización";
+const appVersion = "2026.10.07-11 · Corrección y sincronización de recepciones";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -237,6 +237,7 @@ type Dialog =
   | "producer"
   | "plot"
   | "reception"
+  | "correct_producer_total"
   | "edit_reception"
   | "cancel_reception"
   | "weight"
@@ -887,6 +888,17 @@ function WorkspaceApp() {
         (r) => origin(data, r.id).producer?.id === producer.id,
       )
     : [];
+  const activeProducerReceptions = producerReceptions
+    .filter((reception) => reception.status !== "Cancelado")
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const openProducerTotalCorrection = () => {
+    setError("");
+    if (activeProducerReceptions.length === 1) {
+      openReceptionManagement(activeProducerReceptions[0].id, "edit");
+    } else if (activeProducerReceptions.length > 1) {
+      setDialog("correct_producer_total");
+    }
+  };
   const producerPallets = producer
     ? data.pallets.filter((p) =>
         data.pallet_items.some(
@@ -1993,6 +2005,7 @@ function WorkspaceApp() {
                 : "Nuevo productor",
               plot: "Nueva propiedad y parcela",
               reception: "Nueva recepción",
+              correct_producer_total: "Corregir total recibido",
               edit_reception: "Editar recepción y pesos",
               cancel_reception: "Eliminar recepción",
               weight: "Registrar pesaje",
@@ -2494,6 +2507,53 @@ function WorkspaceApp() {
                 });
               }}
             />
+          )}
+          {dialog === "correct_producer_total" && producer && (
+            <>
+              <h3>{producer.name}</h3>
+              <p className="hint">
+                Elija la entrega que tiene el valor incorrecto. Al guardarla, se
+                actualizará el total recibido de este productor.
+              </p>
+              <div className="record-list">
+                {activeProducerReceptions.map((reception) => {
+                  const source = origin(data, reception.id);
+                  return (
+                    <button
+                      key={reception.id}
+                      className="record"
+                      disabled={busy || receptionSaving}
+                      onClick={() =>
+                        openReceptionManagement(reception.id, "edit")
+                      }
+                      aria-label={
+                        "Corregir entrega del " +
+                        dateLabel(reception.date) +
+                        ", lote " +
+                        source.lot?.code +
+                        ", " +
+                        kg(receptionTotal(data, reception.id)) +
+                        " kg"
+                      }
+                    >
+                      <Pencil size={20} />
+                      <span className="record-main">
+                        <strong>
+                          {kg(receptionTotal(data, reception.id))} kg
+                        </strong>
+                        <small>
+                          {dateLabel(reception.date)} · Lote {source.lot?.code}
+                        </small>
+                      </span>
+                      <ChevronRight size={18} />
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="button full" onClick={close}>
+                Volver al productor
+              </button>
+            </>
           )}
           {(dialog === "edit_reception" || dialog === "cancel_reception") &&
             editingReception && (
@@ -3529,6 +3589,24 @@ function WorkspaceApp() {
         >
           <Badge>{producer.status}</Badge>
           <h2>{producer.name}</h2>
+          <strong className="big-number">
+            {kg(
+              producerReceptions.reduce(
+                (sum, reception) => sum + receptionTotal(data, reception.id),
+                0,
+              ),
+            )}{" "}
+            <small>kg entregados</small>
+          </strong>
+          {can(role, "correct") && activeProducerReceptions.length > 0 && (
+            <button
+              className="button primary full"
+              disabled={busy || receptionSaving}
+              onClick={openProducerTotalCorrection}
+            >
+              <Pencil size={18} /> Corregir total recibido
+            </button>
+          )}
           <p className="hint">
             Código interno Agronorte:{" "}
             <strong>
@@ -3628,15 +3706,6 @@ function WorkspaceApp() {
             {producer.address}
           </p>
           <p>{producer.notes}</p>
-          <strong className="big-number">
-            {kg(
-              producerReceptions.reduce(
-                (s, r) => s + receptionTotal(data, r.id),
-                0,
-              ),
-            )}{" "}
-            <small>kg entregados</small>
-          </strong>
           {workspace.features?.trap_installations && (
             <TrapInstallationsPanel
               records={(workspace.trapInstallations ?? []).filter(

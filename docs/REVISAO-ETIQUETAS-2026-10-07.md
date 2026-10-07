@@ -18,10 +18,26 @@ O proprietário reconfirmou **colheita 02/10/2026** e **recepção 01/10/2026**.
 
 ## Atualização nos dispositivos
 
-Guarde formulários abertos e sincronize as entradas pendentes. Em Configuración, use Verificar actualización e, quando oferecido, Actualizar aplicación. Confira a versão 2026.10.07-8. Depois atualize os dados e abra Pallets → produtor → Etiqueta / QR. Confira a revisão de campos e gere novamente as etiquetas alteradas. Não é necessário limpar o armazenamento do celular.
+Guarde formulários abertos e sincronize as entradas pendentes. Em Configuración, use Verificar actualización e, quando oferecido, Actualizar aplicación. Confira a versão 2026.10.07-11. Depois atualize os dados e abra Pallets → produtor → Etiqueta / QR. Confira a revisão de campos e gere novamente as etiquetas alteradas. Não é necessário limpar o armazenamento do celular.
 
 ## Conferência real e impressão imediata
 
 As operações pontuais foram aplicadas no projeto correto e verificadas em 07/10/2026 às 19:01 UTC, revisão 87: 22 produtores ativos, 34 pallets atuais para Uruguay, 12.470 kg líquidos, 34 taras de 42 kg, AFIDI 1571652 e envasado 07/10/2026 em todos. Não faltam código do produtor, origem, colheita ou importador nas etiquetas atuais. Cirila está vinculada ao SPE-GUA-017-SAN. Os pesos líquidos e vínculos das recepções permanecem iguais. A diferença cronológica dos nove pallets de Elias permanece explícita.
 
 A versão **2026.10.07-9** acrescenta somente **Actualizar datos para imprimir** para recuperar uma sessão de impressão que ficou com revisão antiga. Carrega os registros atuais do servidor, guarda uma cópia local antes da troca e bloqueia a recuperação quando há novos registros operacionais pendentes. Não envia o conteúdo antigo por cima do banco. O proprietário confirmou que o erro atual ocorreu ao abrir/imprimir dados já salvos. Para imprimir imediatamente sem a sessão antiga, uma janela anônima permite entrar na conta e ler os dados atuais.
+
+## Correção do total recebido do produtor
+
+A versão **2026.10.07-11** coloca **Corregir total recibido** ao lado do total na ficha do produtor. Em Productores, abra o produtor e toque nesse botão. Com uma entrega ativa, o editor abre diretamente; com várias, escolha pelo peso, data e lote. O total do produtor é a soma das recepções e será recalculado depois de salvar a correção. Por orientação expressa do proprietário, a edição não pede justificativa: registra automaticamente erro de digitação, usuário, data e valores anteriores/novos na auditoria. Cancelar uma recepção mantém seu fluxo separado.
+
+Uma única pesagem aparece como **Total recibido (kg)**. Para uma recepção com várias pesagens, **Corregir por total** permite informar um único total corrigido: os pesos anteriores ficam cancelados no histórico e um novo registro representa o total informado. Também é possível continuar corrigindo pesagens individuais. O modo escolhido não altera os pesos dos pallets nem distribui valores por estimativa. Perdas e saldo são recalculados pela regra existente; uma redução abaixo dos kg já palletizados exige corrigir os pallets correspondentes primeiro. O teclado numérico aceita vírgula ou ponto. A correção usa a função auditada de recepções já instalada; não requer novo SQL.
+
+## Novas recepções pendentes em outro aparelho
+
+O proprietário informou total recebido de **21.310 kg** e confirmou que os novos recebimentos ficaram em um celular ou outro computador. A consulta real ao Supabase às **19:30 UTC de 07/10/2026** mostrou sete recepções, somando **12.489 kg**. A diferença de **8.821 kg** não foi inserida como um lançamento sem origem: é necessário enviar os registros do aparelho em que foram cadastrados.
+
+Na versão **2026.10.07-11**, **Sincronizar** pode recuperar o conflito de revisão para novas recepções comprovadas pelo histórico local. Consulta o servidor atual, conserva os dados remotos e acrescenta as novas recepções e seus vínculos. A soma das pesagens deve coincidir com o total original auditado; classificação, perdas, pallets e anexos seguem suas validações. Correções de registros antigos, origem ausente, duplicatas ou operações fora desse escopo continuam pendentes para revisão. Nunca substitui os pesos ou metadados atuais do servidor por uma cópia antiga.
+
+Antes de reenviar, guarda uma cópia do espaço, arquivos locais e rascunhos em uma transação IndexedDB. A tentativa usa a revisão atual e é repetida somente uma vez; uma nova concorrência permanece protegida pela função do banco. As trocas de cache verificam também alterações em outra aba. Após um envio confirmado e falha na leitura, mantém a revisão confirmada e tenta somente consultar, evitando reenviar os mesmos registros.
+
+No aparelho de origem, use **Configuración → Descargar respaldo local**, salve formulários abertos e carregue a versão atual. No computador, **Ctrl + Shift + R** atualiza a página; no aplicativo do celular, feche as janelas do sistema e abra novamente com internet. Toque **Sincronizar** no mesmo aparelho em que os novos dados foram lançados. O computador recebe os registros depois que o envio for confirmado. Não limpe o armazenamento nem use **Actualizar datos para imprimir** para descartar entradas novas: essa recuperação continua bloqueada quando há novos registros locais.

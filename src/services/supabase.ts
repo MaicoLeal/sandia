@@ -274,6 +274,15 @@ export async function syncRemote(workspace: Workspace) {
       if (error && !error.message.includes("already exists")) throw error;
     }
   }
+  const profile = await loadProfile();
+  if (
+    profile.user_id !== workspace.profile?.user_id ||
+    profile.organization_id !== workspace.organizationId ||
+    profile.role === "destinatario"
+  )
+    throw new WorkspaceAccessError(
+      "Su sesión o acceso cambió. Los registros locales se conservan; vuelva a entrar antes de sincronizar.",
+    );
   const { data, error } = await supabase.rpc("sync_workspace", {
     payload: workspace.data,
     expected_revision: workspace.revision,

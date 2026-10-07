@@ -3,9 +3,9 @@ import type { Data, Workspace, Profile } from "./types";
 import { LOCAL_ORG, LOCAL_KEY, emptyData } from "./domain";
 import {
   readWorkspace,
-  saveWorkspace,
   removeLegacyDemo,
   archiveWorkspaceAndReplace,
+  replaceWorkspaceIfUnchanged,
 } from "./services/storage";
 import {
   loadProfile,
@@ -16,6 +16,19 @@ import {
 } from "./services/supabase";
 import { getErrorMessage } from "./services/error-message";
 import { assertPrintRecovery } from "./services/workspace-reconciliation";
+import { reconcileNewReceipts } from "./services/workspace-new-receipts-reconciliation";
+
+function isRevisionConflict(error: unknown) {
+  if (typeof error !== "object" || error === null) return false;
+  const problem = error as { code?: unknown; message?: unknown };
+  return (
+    problem.code === "P0001" &&
+    typeof problem.message === "string" &&
+    problem.message.includes(
+      "Conflicto de sincronización: otra persona modificó los datos",
+    )
+  );
+}
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -70,8 +83,9 @@ export function useWorkspace() {
                 "Sincronice los registros pendientes antes de actualizar la etiqueta.",
               );
             if (cached) {
-              cached = { ...cached, needsRefresh: true };
-              await saveWorkspace(key, cached);
+              const refreshCache = { ...cached, needsRefresh: true };
+              await replaceWorkspaceIfUnchanged(key, cached, refreshCache);
+              cached = refreshCache;
               if (!current()) return;
             }
             if (!navigator.onLine)
@@ -115,7 +129,7 @@ export function useWorkspace() {
               ? { ...cached, profile: currentProfile }
               : cached;
             if (currentProfile) {
-              await saveWorkspace(key, verifiedCache);
+              await replaceWorkspaceIfUnchanged(key, cached, verifiedCache);
               if (!current()) return;
             }
             setWorkspace(verifiedCache);
@@ -134,7 +148,7 @@ export function useWorkspace() {
                 remote.profile?.user_id !== session.data.session.user.id
               )
                 return;
-              await saveWorkspace(key, remote);
+              await replaceWorkspaceIfUnchanged(key, verifiedCache, remote);
               if (!current()) return;
               setWorkspace(remote);
             }
@@ -154,7 +168,7 @@ export function useWorkspace() {
             remote.profile?.user_id !== session.data.session.user.id
           )
             return;
-          await saveWorkspace(key, remote);
+          await replaceWorkspaceIfUnchanged(key, undefined, remote);
           if (!current()) return;
           setWorkspace(remote);
         } else {
@@ -175,7 +189,7 @@ export function useWorkspace() {
             organizationId: LOCAL_ORG,
             profile: null,
           };
-          await saveWorkspace(LOCAL_KEY, initial);
+          await replaceWorkspaceIfUnchanged(LOCAL_KEY, cached, initial);
           if (!current()) return;
           setWorkspace(initial);
         }
@@ -262,7 +276,7 @@ export function useWorkspace() {
       update(copy.data);
       copy.pending = !copy.localOnly;
       const key = copy.localOnly ? LOCAL_KEY : "cloud:" + copy.profile?.user_id;
-      await saveWorkspace(key, copy);
+      await replaceWorkspaceIfUnchanged(key, workspace, copy);
       if (request === epoch.current) setWorkspace(copy);
     } finally {
       lock.current = false;
@@ -295,26 +309,59 @@ export function useWorkspace() {
         setRecipientProfile(profile);
         return;
       }
-      const currentWorkspace = { ...workspace, profile };
+      const currentWorkspace: Workspace = { ...workspace, profile };
+      let expectedCache: Workspace = currentWorkspace;
       if (workspace.pending) {
-        const revision = await syncRemote(currentWorkspace);
+        let sendWorkspace: Workspace = currentWorkspace;
+        let revision: number;
+        try {
+          revision = await syncRemote(sendWorkspace);
+        } catch (problem) {
+          if (!isRevisionConflict(problem)) throw problem;
+          const remote = await loadRemote();
+          if (!current()) return;
+          sendWorkspace = reconcileNewReceipts(currentWorkspace, remote);
+          await archiveWorkspaceAndReplace(
+            "cloud:" + workspace.profile?.user_id,
+            currentWorkspace,
+            sendWorkspace,
+          );
+          if (!current()) return;
+          setWorkspace(sendWorkspace);
+          // Retry once using the server revision; a concurrent change still
+          // rejects the transaction and keeps the archived and pending copies.
+          revision = await syncRemote(sendWorkspace);
+        }
         const acknowledged = {
-          ...currentWorkspace,
+          ...sendWorkspace,
           revision,
           pending: false,
           needsRefresh: true,
         };
-        await saveWorkspace(
+        await replaceWorkspaceIfUnchanged(
           "cloud:" + workspace.profile?.user_id,
+          sendWorkspace,
           acknowledged,
         );
         if (!current()) return;
         setWorkspace(acknowledged);
+        expectedCache = acknowledged;
       }
       const remote = await loadRemote();
-      if (!current() || remote.profile?.user_id !== workspace.profile?.user_id)
-        return;
-      await saveWorkspace("cloud:" + remote.profile?.user_id, remote);
+      if (!current()) return;
+      if (
+        remote.profile?.user_id !== workspace.profile?.user_id ||
+        remote.profile?.organization_id !== workspace.organizationId ||
+        remote.organizationId !== workspace.organizationId
+      )
+        throw new WorkspaceAccessError(
+          "Su acceso cambió. Actualice la sesión.",
+        );
+      await replaceWorkspaceIfUnchanged(
+        "cloud:" + remote.profile?.user_id,
+        expectedCache,
+        remote,
+      );
       if (!current()) return;
       setWorkspace(remote);
     } catch (e) {

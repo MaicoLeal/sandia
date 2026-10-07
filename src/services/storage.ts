@@ -15,14 +15,38 @@ export async function readWorkspace(
 export async function saveWorkspace(key: string, state: Workspace) {
   await (await db).put("workspace", state, key);
 }
-function sameStoredWorkspace(a: Workspace | undefined, b: Workspace) {
+function sameStoredWorkspace(
+  a: Workspace | undefined,
+  b: Workspace | undefined,
+) {
+  if (b === undefined) return a === undefined;
   return (
     a?.organizationId === b.organizationId &&
     a?.profile?.user_id === b.profile?.user_id &&
+    a?.localOnly === b.localOnly &&
     a?.revision === b.revision &&
     a?.pending === b.pending &&
+    Boolean(a?.needsRefresh) === Boolean(b.needsRefresh) &&
     JSON.stringify(a?.data) === JSON.stringify(b.data)
   );
+}
+export async function replaceWorkspaceIfUnchanged(
+  key: string,
+  before: Workspace | undefined,
+  after: Workspace,
+) {
+  const database = await db;
+  const tx = database.transaction("workspace", "readwrite");
+  const current = (await tx.store.get(key)) as Workspace | undefined;
+  if (!sameStoredWorkspace(current, before)) {
+    tx.abort();
+    await tx.done.catch(() => undefined);
+    throw new Error(
+      "Los registros locales cambiaron en otra pestaña. Se conservan: cierre las demás pestañas y vuelva a sincronizar.",
+    );
+  }
+  await tx.store.put(after, key);
+  await tx.done;
 }
 // The archive and replacement commit together. A second tab's new local work
 // causes the entire transaction to abort instead of overwriting its changes.

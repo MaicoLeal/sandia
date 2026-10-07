@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   workspaceState: vi.fn(),
   errorState: vi.fn(),
   archive: vi.fn(),
+  reconcile: vi.fn(),
+  replace: vi.fn(),
 }));
 // Exercise the hook's asynchronous loading and identity guards without mounting
 // its separate online/auth event subscription or scheduling automatic sync.
@@ -28,6 +30,7 @@ vi.mock("./services/storage", () => ({
   saveWorkspace: mocks.save,
   removeLegacyDemo: mocks.remove,
   archiveWorkspaceAndReplace: mocks.archive,
+  replaceWorkspaceIfUnchanged: mocks.replace,
 }));
 vi.mock("./services/supabase", () => ({
   supabase: { auth: { getSession: mocks.session } },
@@ -35,6 +38,9 @@ vi.mock("./services/supabase", () => ({
   loadRemote: mocks.remote,
   syncRemote: mocks.sync,
   WorkspaceAccessError: class WorkspaceAccessError extends Error {},
+}));
+vi.mock("./services/workspace-new-receipts-reconciliation", () => ({
+  reconcileNewReceipts: mocks.reconcile,
 }));
 import { useWorkspace } from "./useWorkspace";
 
@@ -99,9 +105,163 @@ beforeEach(() => {
   mocks.remove.mockResolvedValue(undefined);
   mocks.sync.mockResolvedValue(2);
   mocks.archive.mockResolvedValue("recovery:test");
+  mocks.replace.mockResolvedValue(undefined);
 });
 
 describe("sincronización sin descartar registros locales", () => {
+  it("no sobrescribe registros de otra pestaña al crear un lanzamiento local", async () => {
+    const local = pendingWorkspace();
+    const before = structuredClone(local);
+    mocks.replace.mockRejectedValueOnce(
+      new Error("Otra pestaña tiene registros nuevos"),
+    );
+    const hook = useLoadedWorkspace(local);
+    await expect(
+      hook.commit((data) => {
+        data.reception_weights[0].kg = 999;
+      }),
+    ).rejects.toThrow("Otra pestaña tiene registros nuevos");
+    expect(local).toEqual(before);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+  });
+
+  it("reconcilia recepciones nuevas tras conflicto de revisión, archiva antes de reenviar y confirma el servidor", async () => {
+    const pending = pendingWorkspace();
+    const rebased = { ...pending, revision: confirmed.revision };
+    const acknowledged = {
+      ...rebased,
+      revision: 3,
+      pending: false,
+      needsRefresh: true,
+    };
+    const final = { ...acknowledged, needsRefresh: false };
+    mocks.sync.mockRejectedValueOnce({
+      code: "P0001",
+      message:
+        "Conflicto de sincronización: otra persona modificó los datos. Conserve sus registros locales y solicite una conciliación al gestor.",
+    });
+    mocks.sync.mockResolvedValueOnce(3);
+    mocks.remote.mockResolvedValueOnce(confirmed).mockResolvedValueOnce(final);
+    mocks.reconcile.mockReturnValueOnce(rebased);
+
+    await useLoadedWorkspace(pending).sync();
+
+    expect(mocks.reconcile).toHaveBeenCalledExactlyOnceWith(pending, confirmed);
+    expect(mocks.sync).toHaveBeenNthCalledWith(1, pending);
+    expect(mocks.sync).toHaveBeenNthCalledWith(2, rebased);
+    expect(mocks.archive).toHaveBeenNthCalledWith(
+      1,
+      "cloud:operator-a",
+      pending,
+      rebased,
+    );
+    expect(mocks.archive).toHaveBeenCalledOnce();
+    expect(mocks.replace).toHaveBeenNthCalledWith(
+      1,
+      "cloud:operator-a",
+      rebased,
+      acknowledged,
+    );
+    expect(mocks.archive.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sync.mock.invocationCallOrder[1],
+    );
+    expect(mocks.replace).toHaveBeenNthCalledWith(
+      2,
+      "cloud:operator-a",
+      acknowledged,
+      final,
+    );
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).toHaveBeenLastCalledWith(final);
+    expect(pending.pending).toBe(true);
+    expect(pending.revision).toBe(1);
+    expect(final.data.reception_weights[0].kg).toBe(321);
+  });
+
+  it("no reenvía si la conciliación detecta correcciones locales o el respaldo detecta otra pestaña", async () => {
+    const pending = pendingWorkspace();
+    const conflict = {
+      code: "P0001",
+      message: "Conflicto de sincronización: otra persona modificó los datos.",
+    };
+    mocks.sync.mockRejectedValue(conflict);
+    mocks.reconcile.mockImplementationOnce(() => {
+      throw new Error("Hay una corrección local que requiere revisión.");
+    });
+    await useLoadedWorkspace(pending).sync();
+    expect(mocks.sync).toHaveBeenCalledOnce();
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+
+    mocks.sync.mockClear();
+    mocks.reconcile.mockReturnValueOnce({ ...pending, revision: 2 });
+    mocks.archive.mockRejectedValueOnce(
+      new Error("Otra pestaña cambió los datos"),
+    );
+    await useLoadedWorkspace(pending).sync();
+    expect(mocks.sync).toHaveBeenCalledOnce();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+    expect(pending.pending).toBe(true);
+    expect(mocks.errorState).toHaveBeenLastCalledWith(
+      "Otra pestaña cambió los datos",
+    );
+  });
+
+  it("limita la conciliación a un reenvío y conserva la copia pendiente si vuelve a cambiar la revisión", async () => {
+    const pending = pendingWorkspace();
+    const rebased = { ...pending, revision: 2 };
+    const conflict = {
+      code: "P0001",
+      message: "Conflicto de sincronización: otra persona modificó los datos.",
+    };
+    mocks.sync.mockRejectedValue(conflict);
+    mocks.reconcile.mockReturnValueOnce(rebased);
+    await useLoadedWorkspace(pending).sync();
+    expect(mocks.sync).toHaveBeenCalledTimes(2);
+    expect(mocks.remote).toHaveBeenCalledOnce();
+    expect(mocks.archive).toHaveBeenCalledOnce();
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).toHaveBeenCalledExactlyOnceWith(rebased);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(rebased.pending).toBe(true);
+    expect(rebased.data.reception_weights[0].kg).toBe(321);
+  });
+
+  it("no trata otros errores P0001 como conflictos de revisión", async () => {
+    mocks.sync.mockRejectedValue({
+      code: "P0001",
+      message: "Saldo insuficiente para palletizar",
+    });
+    await useLoadedWorkspace(pendingWorkspace()).sync();
+    expect(mocks.sync).toHaveBeenCalledOnce();
+    expect(mocks.remote).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.archive).not.toHaveBeenCalled();
+  });
+
+  it("conserva cambios de otra pestaña tanto al confirmar un envío como al actualizar una lectura", async () => {
+    const pending = pendingWorkspace();
+    const message = "Los registros locales cambiaron en otra pestaña";
+    mocks.replace.mockRejectedValue(new Error(message));
+    await useLoadedWorkspace(pending).sync();
+    expect(mocks.sync).toHaveBeenCalledOnce();
+    expect(mocks.remote).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+    expect(pending.pending).toBe(true);
+
+    mocks.sync.mockClear();
+    await useLoadedWorkspace(confirmed).sync();
+    expect(mocks.sync).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+    expect(mocks.errorState).toHaveBeenLastCalledWith(message);
+  });
+
   it("recupera datos guardados para imprimir después de archivar, sin reenviar el payload antiguo", async () => {
     const local = { ...cache, pending: true };
     expect(await useLoadedWorkspace(local).useServerData()).toBe(true);
@@ -190,8 +350,9 @@ describe("sincronización sin descartar registros locales", () => {
     await useLoadedWorkspace(pending).sync();
 
     expect(mocks.sync).toHaveBeenCalledOnce();
-    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(
+    expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
       "cloud:operator-a",
+      pending,
       acknowledged,
     );
     expect(mocks.workspaceState).toHaveBeenCalledExactlyOnceWith(acknowledged);
@@ -224,8 +385,9 @@ describe("sincronización sin descartar registros locales", () => {
     const refresh = { ...cache, needsRefresh: true };
     await useLoadedWorkspace(refresh).sync();
     expect(mocks.sync).not.toHaveBeenCalled();
-    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(
+    expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
       "cloud:operator-a",
+      refresh,
       confirmed,
     );
     expect(mocks.workspaceState).toHaveBeenCalledExactlyOnceWith(confirmed);
@@ -241,8 +403,9 @@ describe("sincronización sin descartar registros locales", () => {
 
     await hook.reload();
 
-    expect(mocks.save).toHaveBeenCalledExactlyOnceWith(
+    expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
       "cloud:operator-a",
+      cache,
       cache,
     );
     expect(mocks.errorState).toHaveBeenLastCalledWith(
@@ -265,11 +428,21 @@ afterEach(() => vi.unstubAllGlobals());
 describe("confirmación de etiqueta e identidad del espacio", () => {
   it("invalida primero el cache y confirma únicamente los datos remotos del operador", async () => {
     await useWorkspace().reload(true, scope);
-    expect(mocks.save).toHaveBeenNthCalledWith(1, "cloud:operator-a", {
+    const refreshing = {
       ...cache,
       needsRefresh: true,
-    });
-    expect(mocks.save).toHaveBeenLastCalledWith("cloud:operator-a", confirmed);
+    };
+    expect(mocks.replace).toHaveBeenNthCalledWith(
+      1,
+      "cloud:operator-a",
+      cache,
+      refreshing,
+    );
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "cloud:operator-a",
+      refreshing,
+      confirmed,
+    );
   });
   it("rechaza otra sesión antes de leer o alterar su cache", async () => {
     mocks.session.mockResolvedValue({
@@ -290,7 +463,7 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
       "Su sesión o acceso cambió",
     );
     expect(mocks.remote).not.toHaveBeenCalled();
-    expect(mocks.save).toHaveBeenLastCalledWith("cloud:operator-a", {
+    expect(mocks.replace).toHaveBeenLastCalledWith("cloud:operator-a", cache, {
       ...cache,
       needsRefresh: true,
     });
@@ -304,11 +477,20 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     await expect(useWorkspace().reload(true, scope)).rejects.toThrow(
       "Su sesión o acceso cambió",
     );
-    expect(mocks.save).not.toHaveBeenCalledWith("cloud:operator-a", other);
-    expect(mocks.save).toHaveBeenLastCalledWith("cloud:operator-a", {
-      ...cache,
-      needsRefresh: true,
-    });
+    const refreshing = { ...cache, needsRefresh: true };
+    expect(mocks.replace).not.toHaveBeenCalledWith(
+      "cloud:operator-a",
+      refreshing,
+      other,
+    );
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "cloud:operator-a",
+      refreshing,
+      {
+        ...cache,
+        needsRefresh: true,
+      },
+    );
   });
   it("rechaza la confirmación anterior cuando otra recarga la invalida", async () => {
     let resolveRemote!: (value: Workspace) => void;
@@ -331,10 +513,15 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     await expect(useWorkspace().reload(true, scope)).rejects.toThrow(
       "No se pudo confirmar la etiqueta guardada. Conéctese y sincronice antes de imprimir. Connection interrupted",
     );
-    expect(mocks.save).toHaveBeenLastCalledWith("cloud:operator-a", {
-      ...cache,
-      needsRefresh: true,
-    });
+    const refreshing = { ...cache, needsRefresh: true };
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "cloud:operator-a",
+      refreshing,
+      {
+        ...cache,
+        needsRefresh: true,
+      },
+    );
   });
   it("conserva el error plano y su código al impedir la impresión sin confirmación remota", async () => {
     mocks.remote.mockRejectedValue({
@@ -345,10 +532,15 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     await expect(useWorkspace().reload(true, scope)).rejects.toThrow(
       "No se pudo confirmar la etiqueta guardada. Conéctese y sincronice antes de imprimir. permission denied for table pallets (código: 42501)",
     );
-    expect(mocks.save).toHaveBeenLastCalledWith("cloud:operator-a", {
-      ...cache,
-      needsRefresh: true,
-    });
+    const refreshing = { ...cache, needsRefresh: true };
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "cloud:operator-a",
+      refreshing,
+      {
+        ...cache,
+        needsRefresh: true,
+      },
+    );
   });
   it("protege cambios locales pendientes sin sobrescribirlos", async () => {
     mocks.read.mockResolvedValue({ ...cache, pending: true });

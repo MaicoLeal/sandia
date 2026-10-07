@@ -262,7 +262,50 @@ describe("separación de documentos readonly durante la sincronización", () => 
     expect(request).not.toContain("trap_installations");
     expect(request).not.toContain("Documento privado de prueba");
     expect(request).not.toContain("private-latitude");
-    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.from.mock.calls).toEqual([["profiles"]]);
     expect(mocks.getFile).not.toHaveBeenCalled();
+  });
+
+  it("verifica identidad después de subir un archivo y no envía datos si cambió la cuenta", async () => {
+    const workspace: Workspace = {
+      data: emptyData(),
+      revision: 7,
+      pending: true,
+      localOnly: false,
+      organizationId,
+      profile: { ...profile },
+    };
+    workspace.data.attachments.push({
+      id: "test-attachment",
+      organization_id: organizationId,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+      created_by: userId,
+      status: "Activo",
+      entity_type: "receptions",
+      entity_id: "test-reception",
+      name: "archivo.txt",
+      mime: "text/plain",
+      size: 7,
+      storage_path: organizationId + "/test-attachment/archivo.txt",
+    });
+    const upload = vi.fn(async () => {
+      profile = { ...profile, user_id: "another-user" };
+      mocks.getUser.mockResolvedValue({
+        data: { user: { id: profile.user_id } },
+      });
+      return { error: null };
+    });
+    const client = mocks.createClient.mock.results[0].value;
+    client.storage = { from: () => ({ upload }) };
+    mocks.getFile.mockResolvedValue(new Blob(["archivo"]));
+
+    await expect(service.syncRemote(workspace)).rejects.toBeInstanceOf(
+      service.WorkspaceAccessError,
+    );
+    expect(upload).toHaveBeenCalledOnce();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(workspace.pending).toBe(true);
+    expect(workspace.profile?.user_id).toBe(userId);
   });
 });

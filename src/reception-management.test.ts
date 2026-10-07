@@ -211,6 +211,93 @@ describe("autonomía de recepción con historial", () => {
     );
   });
 
+  it("corrige por un único total conservando los pesajes anteriores, otras entregas y pallets", () => {
+    const context = fixture();
+    const { data, reception, first, second } = context;
+    const otherReception = {
+      ...reception,
+      ...base(reception.organization_id),
+    };
+    const otherWeight = {
+      ...first,
+      ...base(reception.organization_id),
+      reception_id: otherReception.id,
+      kg: 250,
+    };
+    data.receptions.push(otherReception);
+    data.reception_weights.push(otherWeight);
+    const palletsBefore = structuredClone(data.pallets);
+    const itemsBefore = structuredClone(data.pallet_items);
+    const replacementId = crypto.randomUUID();
+    const values = parseReceptionManagement(
+      data,
+      reception,
+      currentDraft(context, {
+        weights: [
+          {
+            id: replacementId,
+            kg: "850,5",
+            operator: "Responsable de la corrección",
+            notes: "Corrección del total de recepción",
+          },
+        ],
+      }),
+    );
+    const logs: unknown[][] = [];
+    applyReceptionManagement(
+      data,
+      reception.id,
+      values,
+      (...args) => logs.push(args.slice(1)),
+      "usuario-real",
+    );
+    expect(receptionTotal(data, reception.id)).toBe(850.5);
+    expect(receptionTotal(data, otherReception.id)).toBe(250);
+    expect(
+      data.receptions.reduce(
+        (sum, row) => sum + receptionTotal(data, row.id),
+        0,
+      ),
+    ).toBe(1100.5);
+    for (const previous of [first, second]) {
+      expect(
+        data.reception_weights.find((row) => row.id === previous.id),
+      ).toMatchObject({
+        kg: previous.kg,
+        status: "Cancelado",
+        correction_reason: values.reason,
+      });
+      expect(logs).toContainEqual(
+        expect.arrayContaining([
+          "reception_weights",
+          previous.id,
+          "Pesaje cancelado",
+          expect.objectContaining({ kg: previous.kg, status: "Activo" }),
+          expect.objectContaining({ kg: previous.kg, status: "Cancelado" }),
+          values.reason,
+        ]),
+      );
+    }
+    expect(
+      data.reception_weights.find((row) => row.id === replacementId),
+    ).toMatchObject({
+      kg: 850.5,
+      status: "Activo",
+      sequence: 3,
+      created_by: "usuario-real",
+    });
+    expect(
+      data.reception_weights.find((row) => row.id === otherWeight.id),
+    ).toEqual(otherWeight);
+    expect(data.classifications[0]).toMatchObject({
+      approved_kg: 750.5,
+      rejected_kg: 100,
+    });
+    expect(data.pallets).toEqual(palletsBefore);
+    expect(data.pallet_items).toEqual(itemsBefore);
+    expect(available(data, reception.id)).toBe(150.5);
+  });
+
   it("bloquea el nuevo aprobado debajo de los kg ya asignados a pallets", () => {
     const context = fixture();
     expect(

@@ -45,6 +45,11 @@ export function ReceptionManagement({
   const [rejected, setRejected] = useState(
     String(classification?.rejected_kg ?? 0),
   );
+  const [weightMode, setWeightMode] = useState<"weights" | "total">("weights");
+  const [correctedTotal, setCorrectedTotal] = useState(
+    String(receptionTotal(data, reception.id)),
+  );
+  const [totalWeightId] = useState(() => crypto.randomUUID());
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const actualBlocked =
@@ -53,14 +58,16 @@ export function ReceptionManagement({
       ? impact.cancelBlockedReason
       : impact.editBlockedReason);
   const disabled = busy || !activated || !!actualBlocked;
-  const validWeights = weights.every(
+  const displayedWeights =
+    weightMode === "total" ? [{ kg: correctedTotal }] : weights;
+  const validWeights = displayedWeights.every(
     (weight) =>
       /^\d+(?:[.,]\d{1,2})?$/.test(weight.kg.trim()) &&
       Number(weight.kg.replace(",", ".")) > 0,
   );
   const total = validWeights
     ? round(
-        weights.reduce(
+        displayedWeights.reduce(
           (sum, weight) => sum + Number(weight.kg.replace(",", ".")),
           0,
         ),
@@ -89,10 +96,21 @@ export function ReceptionManagement({
                   date: value("date"),
                   responsible: value("responsible"),
                   notes: value("notes"),
-                  weights,
+                  weights:
+                    weightMode === "total"
+                      ? [
+                          {
+                            id: totalWeightId,
+                            kg: correctedTotal,
+                            operator: value("responsible").trim(),
+                            notes: "Corrección del total de recepción",
+                          },
+                        ]
+                      : weights,
                   rejectedKg: rejected,
                   lossReason: value("loss_reason"),
-                  reason: value("reason"),
+                  reason:
+                    "Corrección de recepción solicitada por error de digitación",
                 });
           assertReceptionManagement(data, reception, values);
           await onSubmit(values);
@@ -205,74 +223,128 @@ export function ReceptionManagement({
               />
             </Field>
           </div>
-          <h3>Pesajes recibidos</h3>
-          <p className="hint">
-            Corrija el valor, quite un pesaje duplicado o agregue uno faltante.
-            Quitar conserva el peso anterior en el historial.
-          </p>
-          <div style={{ display: "grid", gap: 12 }}>
-            {weights.map((weight, index) => (
-              <div
-                key={weight.id}
-                className="row"
-                style={{ alignItems: "end", flexWrap: "nowrap" }}
+          <h3>Corregir peso recibido</h3>
+          {(impact.activeWeights.length > 1 || weights.length > 1) && (
+            <div className="row" style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                className={`button ${weightMode === "weights" ? "primary" : "secondary"}`}
+                disabled={disabled}
+                aria-pressed={weightMode === "weights"}
+                onClick={() => setWeightMode("weights")}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <Field label={`Pesaje ${index + 1} (kg) *`}>
-                    <NumericInput
-                      required
-                      value={weight.kg}
-                      maxLength={15}
+                Editar pesajes
+              </button>
+              <button
+                type="button"
+                className={`button ${weightMode === "total" ? "primary" : "secondary"}`}
+                disabled={disabled}
+                aria-pressed={weightMode === "total"}
+                onClick={() => setWeightMode("total")}
+              >
+                Corregir por total
+              </button>
+            </div>
+          )}
+          {weightMode === "total" ? (
+            <>
+              <Field label="Total recibido (kg) *">
+                <NumericInput
+                  required
+                  value={correctedTotal}
+                  maxLength={15}
+                  disabled={disabled}
+                  onChange={(event) => setCorrectedTotal(event.target.value)}
+                />
+              </Field>
+              <p className="hint">
+                Al guardar, este total sustituirá los pesajes activos de esta
+                recepción. Los pesos anteriores quedarán en el historial. Los
+                pallets conservarán sus pesos; no se distribuye el total entre
+                ellos.
+              </p>
+              <p className="hint">
+                Puede volver a Editar pesajes antes de guardar. Los valores
+                digitados en cada modo se conservan.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="hint">
+                Corrija el valor, quite un pesaje duplicado o agregue uno
+                faltante. Quitar conserva el peso anterior en el historial.
+              </p>
+              <div style={{ display: "grid", gap: 12 }}>
+                {weights.map((weight, index) => (
+                  <div
+                    key={weight.id}
+                    className="row"
+                    style={{ alignItems: "end", flexWrap: "nowrap" }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Field
+                        label={
+                          weights.length === 1
+                            ? "Total recibido (kg) *"
+                            : `Pesaje ${index + 1} (kg) *`
+                        }
+                      >
+                        <NumericInput
+                          required
+                          value={weight.kg}
+                          maxLength={15}
+                          disabled={busy}
+                          onChange={(event) =>
+                            setWeights((current) =>
+                              current.map((row) =>
+                                row.id === weight.id
+                                  ? { ...row, kg: event.target.value }
+                                  : row,
+                              ),
+                            )
+                          }
+                        />
+                      </Field>
+                    </div>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      style={{ marginBottom: 14, minHeight: 48 }}
                       disabled={busy}
-                      onChange={(event) =>
+                      aria-label={`Quitar pesaje ${index + 1}`}
+                      onClick={() =>
                         setWeights((current) =>
-                          current.map((row) =>
-                            row.id === weight.id
-                              ? { ...row, kg: event.target.value }
-                              : row,
-                          ),
+                          current.filter((row) => row.id !== weight.id),
                         )
                       }
-                    />
-                  </Field>
-                </div>
-                <button
-                  type="button"
-                  className="button secondary"
-                  style={{ marginBottom: 14, minHeight: 48 }}
-                  disabled={busy}
-                  aria-label={`Quitar pesaje ${index + 1}`}
-                  onClick={() =>
-                    setWeights((current) =>
-                      current.filter((row) => row.id !== weight.id),
-                    )
-                  }
-                >
-                  <Trash2 size={18} />
-                  <span>Quitar</span>
-                </button>
+                    >
+                      <Trash2 size={18} />
+                      <span>Quitar</span>
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="button secondary full"
-            disabled={busy || weights.length >= 1000}
-            onClick={() =>
-              setWeights((current) => [
-                ...current,
-                {
-                  id: crypto.randomUUID(),
-                  kg: "",
-                  operator: reception.responsible,
-                  notes: "",
-                },
-              ])
-            }
-          >
-            <Plus size={18} />
-            Agregar pesaje
-          </button>
+              <button
+                type="button"
+                className="button secondary full"
+                disabled={busy || weights.length >= 1000}
+                onClick={() =>
+                  setWeights((current) => [
+                    ...current,
+                    {
+                      id: crypto.randomUUID(),
+                      kg: "",
+                      operator: reception.responsible,
+                      notes: "",
+                    },
+                  ])
+                }
+              >
+                <Plus size={18} />
+                Agregar pesaje
+              </button>
+            </>
+          )}
           <div className="weight-summary" aria-live="polite">
             <div>
               <small>Total corregido</small>
@@ -281,8 +353,14 @@ export function ReceptionManagement({
               </strong>
             </div>
             <div>
-              <small>Pesajes activos</small>
-              <strong>{weights.length}</strong>
+              <small>
+                {weightMode === "total"
+                  ? "Registro al guardar"
+                  : "Pesajes activos"}
+              </small>
+              <strong>
+                {weightMode === "total" ? "1 peso total" : weights.length}
+              </strong>
             </div>
           </div>
           {classification && (
@@ -337,24 +415,20 @@ export function ReceptionManagement({
           </Field>
         </>
       )}
-      <Field
-        label={
-          action === "cancel"
-            ? "Motivo de la cancelación *"
-            : "Motivo de la corrección *"
-        }
-      >
-        <textarea
-          name="reason"
-          required
-          maxLength={1000}
-          placeholder={
-            action === "cancel"
-              ? "Ej.: recepción registrada dos veces"
-              : "Ej.: corregir un peso digitado por error"
-          }
-        />
-      </Field>
+      {action === "cancel" ? (
+        <Field label="Motivo de la cancelación *">
+          <textarea
+            name="reason"
+            required
+            maxLength={1000}
+            placeholder="Ej.: recepción registrada dos veces"
+          />
+        </Field>
+      ) : (
+        <p className="hint">
+          La corrección se guardará con el valor anterior, fecha y usuario.
+        </p>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
