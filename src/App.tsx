@@ -139,7 +139,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-8 · Revisión de etiquetas y datos";
+const appVersion = "2026.10.07-9 · Recuperación de sincronización";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -423,6 +423,7 @@ function WorkspaceApp() {
     online,
     commit,
     sync,
+    useServerData: recoverPrintData,
     role,
   } = useWorkspace();
   const [page, setPage] = useState<Page>(
@@ -621,6 +622,21 @@ function WorkspaceApp() {
     } catch (e) {
       setError(getErrorMessage(e, "No se pudo guardar."));
       return false;
+    }
+  };
+  const updateDataForPrinting = async () => {
+    try {
+      if (await recoverPrintData())
+        setMessage(
+          "Datos actualizados del servidor. Revise la etiqueta y ya puede imprimir.",
+        );
+    } catch (problem) {
+      setError(
+        getErrorMessage(
+          problem,
+          "No se pudo actualizar los datos para imprimir.",
+        ),
+      );
     }
   };
   const rows = data.receptions.filter((r) => {
@@ -1150,6 +1166,29 @@ function WorkspaceApp() {
               </button>
             </div>
           )}
+          {!workspace.localOnly &&
+            workspace.profile &&
+            (workspace.pending ||
+              workspace.needsRefresh ||
+              /P0001|revisi[oó]n|versi[oó]n/i.test(error)) && (
+              <div className="setting-info no-print">
+                <div>
+                  <p>
+                    Para abrir o imprimir registros ya guardados, actualice las
+                    etiquetas del servidor. Primero se conserva una copia de
+                    este dispositivo; los registros locales nuevos se protegen.
+                  </p>
+                  <button
+                    className="button secondary"
+                    disabled={busy || !online}
+                    onClick={() => void updateDataForPrinting()}
+                  >
+                    <RefreshCw size={18} />
+                    Actualizar datos para imprimir
+                  </button>
+                </div>
+              </div>
+            )}
           {message && (
             <div className="toast" role="status">
               <Check size={16} />
@@ -3217,6 +3256,11 @@ function WorkspaceApp() {
             online={online}
             syncError={error}
             onSync={sync}
+            onUseServerData={
+              !workspace.localOnly && workspace.profile
+                ? updateDataForPrinting
+                : undefined
+            }
             editActivationPending={!exportFieldsEnabled}
             onEditExport={
               can(role, "pallet") &&

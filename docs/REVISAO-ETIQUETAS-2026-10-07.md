@@ -19,3 +19,9 @@ O proprietário reconfirmou **colheita 02/10/2026** e **recepção 01/10/2026**.
 ## Atualização nos dispositivos
 
 Guarde formulários abertos e sincronize as entradas pendentes. Em Configuración, use Verificar actualización e, quando oferecido, Actualizar aplicación. Confira a versão 2026.10.07-8. Depois atualize os dados e abra Pallets → produtor → Etiqueta / QR. Confira a revisão de campos e gere novamente as etiquetas alteradas. Não é necessário limpar o armazenamento do celular.
+
+## Conferência real e impressão imediata
+
+As operações pontuais foram aplicadas no projeto correto e verificadas em 07/10/2026 às 19:01 UTC, revisão 87: 22 produtores ativos, 34 pallets atuais para Uruguay, 12.470 kg líquidos, 34 taras de 42 kg, AFIDI 1571652 e envasado 07/10/2026 em todos. Não faltam código do produtor, origem, colheita ou importador nas etiquetas atuais. Cirila está vinculada ao SPE-GUA-017-SAN. Os pesos líquidos e vínculos das recepções permanecem iguais. A diferença cronológica dos nove pallets de Elias permanece explícita.
+
+A versão **2026.10.07-9** acrescenta somente **Actualizar datos para imprimir** para recuperar uma sessão de impressão que ficou com revisão antiga. Carrega os registros atuais do servidor, guarda uma cópia local antes da troca e bloqueia a recuperação quando há novos registros operacionais pendentes. Não envia o conteúdo antigo por cima do banco. O proprietário confirmou que o erro atual ocorreu ao abrir/imprimir dados já salvos. Para imprimir imediatamente sem a sessão antiga, uma janela anônima permite entrar na conta e ler os dados atuais.

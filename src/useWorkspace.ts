@@ -5,6 +5,7 @@ import {
   readWorkspace,
   saveWorkspace,
   removeLegacyDemo,
+  archiveWorkspaceAndReplace,
 } from "./services/storage";
 import {
   loadProfile,
@@ -14,6 +15,7 @@ import {
   WorkspaceAccessError,
 } from "./services/supabase";
 import { getErrorMessage } from "./services/error-message";
+import { assertPrintRecovery } from "./services/workspace-reconciliation";
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -338,6 +340,43 @@ export function useWorkspace() {
     const timer = setTimeout(() => void sync(), 1500);
     return () => clearTimeout(timer);
   }, [workspace, online, sync]);
+  const useServerData = async (): Promise<boolean> => {
+    if (!workspace || workspace.localOnly || lock.current) return false;
+    lock.current = true;
+    const request = epoch.current;
+    const current = () => request === epoch.current;
+    setBusy(true);
+    setError("");
+    try {
+      if (!online)
+        throw new Error(
+          "Conéctese para consultar los datos guardados en el servidor.",
+        );
+      const remote = await loadRemote();
+      if (!current()) return false;
+      assertPrintRecovery(workspace, remote);
+      await archiveWorkspaceAndReplace(
+        "cloud:" + workspace.profile?.user_id,
+        workspace,
+        remote,
+      );
+      if (!current()) return false;
+      setWorkspace(remote);
+      return true;
+    } catch (e) {
+      if (current())
+        setError(
+          getErrorMessage(
+            e,
+            "No se pudieron actualizar los datos. Su copia local se conserva.",
+          ),
+        );
+      return false;
+    } finally {
+      lock.current = false;
+      if (current()) setBusy(false);
+    }
+  };
   return {
     recipientProfile,
     needsLogin,
@@ -348,6 +387,7 @@ export function useWorkspace() {
     online,
     commit,
     sync,
+    useServerData,
     reload: load,
     role: workspace?.localOnly
       ? ("administrador" as const)

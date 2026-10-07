@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   sync: vi.fn(),
   workspaceState: vi.fn(),
   errorState: vi.fn(),
+  archive: vi.fn(),
 }));
 // Exercise the hook's asynchronous loading and identity guards without mounting
 // its separate online/auth event subscription or scheduling automatic sync.
@@ -26,6 +27,7 @@ vi.mock("./services/storage", () => ({
   readWorkspace: mocks.read,
   saveWorkspace: mocks.save,
   removeLegacyDemo: mocks.remove,
+  archiveWorkspaceAndReplace: mocks.archive,
 }));
 vi.mock("./services/supabase", () => ({
   supabase: { auth: { getSession: mocks.session } },
@@ -96,9 +98,60 @@ beforeEach(() => {
   mocks.save.mockResolvedValue(undefined);
   mocks.remove.mockResolvedValue(undefined);
   mocks.sync.mockResolvedValue(2);
+  mocks.archive.mockResolvedValue("recovery:test");
 });
 
 describe("sincronización sin descartar registros locales", () => {
+  it("recupera datos guardados para imprimir después de archivar, sin reenviar el payload antiguo", async () => {
+    const local = { ...cache, pending: true };
+    expect(await useLoadedWorkspace(local).useServerData()).toBe(true);
+    expect(mocks.sync).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.archive).toHaveBeenCalledExactlyOnceWith(
+      "cloud:operator-a",
+      local,
+      confirmed,
+    );
+    expect(mocks.workspaceState).toHaveBeenCalledExactlyOnceWith(confirmed);
+    expect(mocks.archive.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.workspaceState.mock.invocationCallOrder[0],
+    );
+  });
+  it("bloquea recuperación si hay un pesaje nuevo y mantiene la copia local", async () => {
+    const local = pendingWorkspace();
+    const before = structuredClone(local);
+    expect(await useLoadedWorkspace(local).useServerData()).toBe(false);
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+    expect(mocks.sync).not.toHaveBeenCalled();
+    expect(local).toEqual(before);
+    expect(mocks.errorState).toHaveBeenLastCalledWith(
+      expect.stringContaining("Hay registros nuevos"),
+    );
+  });
+  it("conserva cache si falla lectura remota, respaldo o guard de otra pestaña", async () => {
+    const local = { ...cache, pending: true };
+    mocks.remote.mockRejectedValueOnce(new Error("Sin conexión"));
+    expect(await useLoadedWorkspace(local).useServerData()).toBe(false);
+    expect(mocks.archive).not.toHaveBeenCalled();
+    mocks.archive.mockRejectedValueOnce(
+      new Error("Los registros locales cambiaron en otra pestaña"),
+    );
+    expect(await useLoadedWorkspace(local).useServerData()).toBe(false);
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+    expect(mocks.sync).not.toHaveBeenCalled();
+  });
+  it("rechaza datos de otra cuenta antes de archivar o sustituir", async () => {
+    mocks.remote.mockResolvedValue({
+      ...confirmed,
+      profile: { ...profile, user_id: "otra-cuenta" },
+    });
+    expect(
+      await useLoadedWorkspace({ ...cache, pending: true }).useServerData(),
+    ).toBe(false);
+    expect(mocks.archive).not.toHaveBeenCalled();
+    expect(mocks.workspaceState).not.toHaveBeenCalled();
+  });
   it("expone un error RPC plano y conserva la revisión y los registros pendientes", async () => {
     const pending = pendingWorkspace();
     const before = structuredClone(pending);

@@ -161,6 +161,7 @@ export function Label({
   online = true,
   syncError = "",
   onSync,
+  onUseServerData,
   onEditExport,
   editActivationPending = false,
 }: {
@@ -172,6 +173,7 @@ export function Label({
   online?: boolean;
   syncError?: string;
   onSync?: () => Promise<void>;
+  onUseServerData?: () => Promise<void>;
   onEditExport?: () => void;
   editActivationPending?: boolean;
 }) {
@@ -386,6 +388,22 @@ export function Label({
               >
                 Sincronizar
               </button>
+            )}
+            {onUseServerData && (
+              <>
+                <p>
+                  Para imprimir datos ya guardados, cargue la versión del
+                  servidor. Primero se conserva una copia local; los registros
+                  nuevos se protegen.
+                </p>
+                <button
+                  className="button secondary"
+                  disabled={busy || !online}
+                  onClick={() => void onUseServerData()}
+                >
+                  Actualizar datos para imprimir
+                </button>
+              </>
             )}
             {syncError && (
               <p className="error" role="alert">

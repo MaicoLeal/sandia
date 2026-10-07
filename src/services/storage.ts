@@ -15,6 +15,64 @@ export async function readWorkspace(
 export async function saveWorkspace(key: string, state: Workspace) {
   await (await db).put("workspace", state, key);
 }
+function sameStoredWorkspace(a: Workspace | undefined, b: Workspace) {
+  return (
+    a?.organizationId === b.organizationId &&
+    a?.profile?.user_id === b.profile?.user_id &&
+    a?.revision === b.revision &&
+    a?.pending === b.pending &&
+    JSON.stringify(a?.data) === JSON.stringify(b.data)
+  );
+}
+// The archive and replacement commit together. A second tab's new local work
+// causes the entire transaction to abort instead of overwriting its changes.
+export async function archiveWorkspaceAndReplace(
+  key: string,
+  before: Workspace,
+  after: Workspace,
+) {
+  const database = await db;
+  const tx = database.transaction(
+    ["workspace", "files", "drafts"],
+    "readwrite",
+  );
+  const current = (await tx.objectStore("workspace").get(key)) as
+    Workspace | undefined;
+  if (!sameStoredWorkspace(current, before)) {
+    tx.abort();
+    await tx.done.catch(() => undefined);
+    throw new Error(
+      "Los registros locales cambiaron en otra pestaña. Compare nuevamente antes de actualizar.",
+    );
+  }
+  const files: { id: string; file: Blob }[] = [];
+  for (const attachment of before.data.attachments) {
+    const file = (await tx.objectStore("files").get(attachment.id)) as
+      Blob | undefined;
+    if (file) files.push({ id: attachment.id, file });
+  }
+  const draftStore = tx.objectStore("drafts");
+  const drafts: { key: string; value: unknown }[] = [];
+  for (const draftKey of await draftStore.getAllKeys())
+    if (String(draftKey).startsWith(before.organizationId + ":"))
+      drafts.push({
+        key: String(draftKey),
+        value: await draftStore.get(draftKey),
+      });
+  const archiveKey = `recovery:${key}:${new Date().toISOString()}:${crypto.randomUUID()}`;
+  await tx.objectStore("workspace").put(
+    {
+      workspace: before,
+      files,
+      drafts,
+      archivedAt: new Date().toISOString(),
+    },
+    archiveKey,
+  );
+  await tx.objectStore("workspace").put(after, key);
+  await tx.done;
+  return archiveKey;
+}
 export async function saveFile(id: string, file: Blob) {
   await (await db).put("files", file, id);
 }
