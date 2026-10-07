@@ -10,7 +10,7 @@ Os códigos são gerados no servidor, com bloqueio por organização e unicidade
 - Na seleção do produtor durante a recepção e na consulta de pallets.
 - Na identificação da etiqueta A4 paisagem e no PDF, junto ao produtor, como **Código interno Agronorte**.
 
-O código oficial de exportação fica no campo separado `export_code`. A linha **CÓDIGO DEL PRODUCTOR** da tabela da etiqueta continua usando o código oficial confirmado, inclusive quando houver um valor específico no pallet. O código interno não substitui registros oficiais nem usa RUC, CI, telefone ou UUID como identificação impressa.
+O código oficial de exportação fica no campo separado `export_code`. A partir da versão 2026.10.07-2, a linha **CÓDIGO DEL PRODUCTOR** usa o valor específico da etiqueta, quando informado; caso contrário, usa as referências SPE/CAN da planilha de armadilhas, conforme solicitado pelo proprietário, e então o código de exportação disponível. As referências de armadilhas são identificadas no cadastro como **Referencia SPE/CAN**. O código interno AGN continua separado e não usa RUC, CI, telefone ou UUID como identificação impressa. Consulte `docs/REFERENCIAS-FITOSANITARIAS.md` para a importação dos registros reais.
 
 Para pallets com mais de um produtor, a identificação da etiqueta apresenta os códigos internos vinculados às origens, sem repetir o mesmo código. O AFIDI, o QR, os pesos, o lote e os demais campos de exportação permanecem disponíveis.
 

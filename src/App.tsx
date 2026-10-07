@@ -39,6 +39,7 @@ import type {
   Table,
   PalletTrace,
   PalletExportLabel,
+  TrapInstallation,
 } from "./types";
 import {
   intakeSelection,
@@ -64,6 +65,7 @@ import {
   summary,
 } from "./domain";
 import { LossFields } from "./LossFields";
+import { TrapInstallationsPanel } from "./TrapInstallationsPanel";
 import { PalletCorrection } from "./PalletCorrection";
 import { ReceptionManagement } from "./ReceptionManagement";
 import {
@@ -118,7 +120,14 @@ import {
   shipmentReportRows,
   producerAllocatedKg,
 } from "./services/operational-report-rows";
-import { palletLabelEditValues } from "./services/pallet-label-data";
+import {
+  palletLabelEditValues,
+  SENAVE_DECLARATION,
+} from "./services/pallet-label-data";
+import {
+  filterTrapInstallations,
+  trapInstallationRows,
+} from "./services/trap-installation-reports";
 import {
   applyAppUpdate,
   checkAppUpdate,
@@ -126,7 +135,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-1 · Códigos de productores";
+const appVersion = "2026.10.07-2 · Referencias SPE/CAN";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1450,6 +1459,7 @@ function WorkspaceApp() {
                       p.community,
                       p.metadata?.internal_code,
                       p.metadata?.export_code,
+                      ...(p.metadata?.trap_reference_codes ?? []),
                     ]
                       .join(" ")
                       .toLowerCase()
@@ -1476,6 +1486,22 @@ function WorkspaceApp() {
                         </strong>
                       </p>
                       <p>{p.community || "Localidad no registrada"}</p>
+                      {!!p.metadata?.trap_reference_codes?.length && (
+                        <p className="hint">
+                          Referencia SPE/CAN:{" "}
+                          <strong>
+                            {p.metadata.trap_reference_codes.join(" / ")}
+                          </strong>
+                        </p>
+                      )}
+                      {p.metadata?.harvest_reference && (
+                        <p className="hint">
+                          Cosecha informada:{" "}
+                          {dateLabel(p.metadata.harvest_reference.date)}
+                          {p.metadata.harvest_reference.status !==
+                            "Confirmado" && " · Pendiente de confirmar"}
+                        </p>
+                      )}
                       <div className="producer-total">
                         <strong>
                           {kg(
@@ -1873,7 +1899,14 @@ function WorkspaceApp() {
               )}
             </>
           )}
-          {page === "Informes" && <Reports data={data} onError={setError} />}
+          {page === "Informes" && (
+            <Reports
+              data={data}
+              trapInstallations={workspace.trapInstallations ?? []}
+              trapsEnabled={Boolean(workspace.features?.trap_installations)}
+              onError={setError}
+            />
+          )}
           <footer>
             Peso siempre en kg · Fechas del Paraguay ·{" "}
             {workspace.localOnly
@@ -2059,6 +2092,24 @@ function WorkspaceApp() {
                 Se asigna automáticamente al sincronizar y permanece vinculado
                 al productor para sus etiquetas.
               </p>
+              {!!editingProducer?.metadata?.trap_reference_codes?.length && (
+                <Field label="Referencia SPE/CAN · planilla de trampas">
+                  <input
+                    readOnly
+                    value={editingProducer.metadata.trap_reference_codes.join(
+                      " / ",
+                    )}
+                  />
+                </Field>
+              )}
+              {editingProducer?.metadata?.harvest_reference && (
+                <Field label="Cosecha informada en la planilla">
+                  <input
+                    readOnly
+                    value={`${dateLabel(editingProducer.metadata.harvest_reference.date)} · ${editingProducer.metadata.harvest_reference.status}`}
+                  />
+                </Field>
+              )}
               <div className="form-grid">
                 <Field label="Documento / RUC / CI">
                   <input
@@ -3440,6 +3491,47 @@ function WorkspaceApp() {
                 "Pendiente de asignar"}
             </strong>
           </p>
+          {!!producer.metadata?.trap_reference_codes?.length && (
+            <p className="hint">
+              Referencia SPE/CAN:{" "}
+              <strong>
+                {producer.metadata.trap_reference_codes.join(" / ")}
+              </strong>
+            </p>
+          )}
+          {producer.metadata?.harvest_reference && (
+            <section
+              className="panel inset"
+              aria-label="Fecha de cosecha informada"
+            >
+              <h3>
+                Cosecha informada · {producer.metadata.harvest_reference.season}
+              </h3>
+              <p>
+                <strong>
+                  {dateLabel(producer.metadata.harvest_reference.date)}
+                </strong>{" "}
+                · <Badge>{producer.metadata.harvest_reference.status}</Badge>
+              </p>
+              <p className="hint">
+                Las etiquetas usan la fecha confirmada del lote o esta
+                referencia cuando corresponde a la recepción.
+              </p>
+              <details>
+                <summary>Fuente de la fecha</summary>
+                <p className="hint">
+                  {producer.metadata.harvest_reference.source}
+                </p>
+                {producer.metadata.harvest_reference.notes.map(
+                  (note, index) => (
+                    <p className="hint" key={index}>
+                      {note}
+                    </p>
+                  ),
+                )}
+              </details>
+            </section>
+          )}
           {can(role, "correct") && (
             <button
               className="button secondary full"
@@ -3500,6 +3592,13 @@ function WorkspaceApp() {
             )}{" "}
             <small>kg entregados</small>
           </strong>
+          {workspace.features?.trap_installations && (
+            <TrapInstallationsPanel
+              records={(workspace.trapInstallations ?? []).filter(
+                (record) => record.producer_id === producer.id,
+              )}
+            />
+          )}
           <h3>Propiedades y parcelas</h3>
           {data.plots
             .filter(
@@ -4323,8 +4422,9 @@ function ExportLabelFields({ value }: { value?: PalletExportLabel }) {
         />
       </Field>
       <p className="hint">
-        Si deja código u origen vacíos, se usan los datos de exportación del
-        productor, cuando estén registrados.
+        Si deja el código vacío, se usa la referencia SPE/CAN de la planilla de
+        trampas, o el código de exportación del productor cuando no haya
+        referencia. El origen se toma del productor si está registrado.
       </p>
       <label className="check-row">
         <input
@@ -4334,14 +4434,30 @@ function ExportLabelFields({ value }: { value?: PalletExportLabel }) {
         />
         Lote incluido en el programa SENAVE para Uruguay
       </label>
+      <details className="panel inset">
+        <summary>Ver texto del modelo para Uruguay</summary>
+        <p>
+          {SENAVE_DECLARATION} <em>Anastrepha grandis.</em> LOTE N°: [lote
+          registrado]
+        </p>
+        <p className="hint">
+          Este texto se imprime al seleccionar el programa SENAVE para Uruguay.
+          La etiqueta toma la especie, origen, código del productor, cosecha,
+          AFIDI y lote de los registros confirmados.
+        </p>
+      </details>
     </>
   );
 }
 function Reports({
   data,
+  trapInstallations,
+  trapsEnabled,
   onError,
 }: {
   data: Data;
+  trapInstallations: TrapInstallation[];
+  trapsEnabled: boolean;
   onError: (message: string) => void;
 }) {
   const [kind, setKind] = useState("Recepción");
@@ -4376,6 +4492,13 @@ function Reports({
     );
   if (["Expedición", "Exportación"].includes(kind))
     report = shipmentReportRows(data, producer, from, to);
+  const filteredTraps = filterTrapInstallations(
+    trapInstallations,
+    data.producers,
+    { from, to, producerId: producer, query },
+  );
+  if (kind === "Instalación de trampas")
+    report = trapInstallationRows(filteredTraps, data.producers);
   const regional = regionalLosses(data, from, to, producer);
   const threshold = Number(lossThreshold.replace(",", "."));
   const validThreshold =
@@ -4429,11 +4552,12 @@ function Reports({
           Calidad: c.quality ?? "Sin evaluar",
         };
       });
-  report = report.filter((r) =>
-    Object.values(r).some((v) =>
-      String(v).toLowerCase().includes(query.toLowerCase()),
-    ),
-  );
+  if (kind !== "Instalación de trampas")
+    report = report.filter((r) =>
+      Object.values(r).some((v) =>
+        String(v).toLowerCase().includes(query.toLowerCase()),
+      ),
+    );
   const headers = report.length ? Object.keys(report[0]) : [];
   const action = (fn: () => void) => {
     try {
@@ -4456,19 +4580,28 @@ function Reports({
               "Rechazos",
               "Pérdidas por región",
               "Exportación",
+              "Instalación de trampas",
             ].map((k) => (
               <option key={k}>{k}</option>
             ))}
           </select>
         </Field>
-        <Field label="Desde">
+        <Field
+          label={
+            kind === "Instalación de trampas" ? "Instalación desde" : "Desde"
+          }
+        >
           <input
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
           />
         </Field>
-        <Field label="Hasta">
+        <Field
+          label={
+            kind === "Instalación de trampas" ? "Instalación hasta" : "Hasta"
+          }
+        >
           <input
             type="date"
             value={to}
@@ -4488,7 +4621,13 @@ function Reports({
             ))}
           </select>
         </Field>
-        <Field label="Lote / pallet / destino">
+        <Field
+          label={
+            kind === "Instalación de trampas"
+              ? "Código / nombre / localidad"
+              : "Lote / pallet / destino"
+          }
+        >
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -4496,6 +4635,12 @@ function Reports({
           />
         </Field>
       </div>
+      {kind === "Instalación de trampas" && !trapsEnabled && (
+        <p className="hint" role="status">
+          Aplique la actualización SQL de la planilla de trampas en Supabase y
+          sincronice para consultar sus registros.
+        </p>
+      )}
       {kind === "Pallet" && (
         <label className="check">
           <input
@@ -4585,8 +4730,31 @@ function Reports({
               action(() =>
                 printReport(
                   "Informe de " + kind,
-                  headers,
-                  report.map((r) => headers.map((h) => r[h])),
+                  kind === "Instalación de trampas"
+                    ? [
+                        "Referencia",
+                        "Productor",
+                        "Instalación",
+                        "Localidad",
+                        "Hospedante",
+                        "Área ha",
+                        "Revisión",
+                      ]
+                    : headers,
+                  kind === "Instalación de trampas"
+                    ? report.map((r) => [
+                        r.Código_trampa,
+                        r.Productor,
+                        r.Fecha_instalación,
+                        r.Comunidad,
+                        r.Hospedante,
+                        r.Área_ha,
+                        r.Revisión,
+                      ])
+                    : report.map((r) => headers.map((h) => r[h])),
+                  kind === "Instalación de trampas"
+                    ? { landscape: true, weightCaption: false }
+                    : undefined,
                 ),
               )
             }
@@ -4596,26 +4764,35 @@ function Reports({
           </button>
         </div>
       </div>
-      <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              {headers.map((h) => (
-                <th key={h}>{h.replaceAll("_", " ")}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {report.map((r, i) => (
-              <tr key={i}>
+      {kind === "Instalación de trampas" ? (
+        <TrapInstallationsPanel
+          records={filteredTraps}
+          producers={data.producers}
+        />
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
                 {headers.map((h) => (
-                  <td key={h}>{typeof r[h] === "number" ? kg(r[h]) : r[h]}</td>
+                  <th key={h}>{h.replaceAll("_", " ")}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {report.map((r, i) => (
+                <tr key={i}>
+                  {headers.map((h) => (
+                    <td key={h}>
+                      {typeof r[h] === "number" ? kg(r[h]) : r[h]}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {!report.length && (
         <Empty>No hay registros que coincidan con los filtros.</Empty>
       )}

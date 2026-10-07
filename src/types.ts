@@ -14,11 +14,20 @@ export interface Base {
   created_by: string | null;
   status: string;
 }
+export interface ProducerHarvestReference {
+  date: string;
+  season: number;
+  status: "Confirmado" | "Pendiente de confirmar";
+  source: string;
+  notes: string[];
+}
 export interface Producer extends Base {
   metadata?: {
     internal_code?: string;
     export_code?: string;
     export_origin?: string;
+    trap_reference_codes?: string[];
+    harvest_reference?: ProducerHarvestReference;
   } | null;
   name: string;
   document: string;
@@ -31,6 +40,29 @@ export interface Farm extends Base {
   producer_id: string;
   name: string;
   location: string;
+}
+export interface TrapInstallation extends Base {
+  producer_id: string | null;
+  source_key: string;
+  source_row: number;
+  source_document: string;
+  source_form: string;
+  source_version: string;
+  source_producer_name: string | null;
+  trap_code: string;
+  department: string;
+  district: string;
+  community: string;
+  installed_on: string | null;
+  trap_type: string;
+  latitude_raw: string;
+  longitude_raw: string;
+  installation_place: string;
+  host: string;
+  area_ha: number | null;
+  crop_stage: string;
+  responsible: string;
+  review_notes: string[];
 }
 export interface Plot extends Base {
   farm_id: string;
@@ -169,6 +201,7 @@ export interface Workspace {
     pallet_corrections?: boolean;
     reception_management?: boolean;
     pallet_tare?: boolean;
+    trap_installations?: boolean;
   };
   needsRefresh?: boolean;
   data: Data;
@@ -177,6 +210,7 @@ export interface Workspace {
   localOnly: boolean;
   organizationId: string;
   profile: Profile | null;
+  trapInstallations?: TrapInstallation[];
 }
 
 export interface RecipientPallet {

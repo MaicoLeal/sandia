@@ -150,7 +150,7 @@ export function createPalletLabelPdf(
   const lastY = 176 + declaration.length * 13 * 0.352778 * 1.1;
   pdf.setFont("helvetica", label.senaveProgram ? "bolditalic" : "bold");
   pdf.setFontSize(12);
-  const lotLine = `${label.senaveProgram ? "Anastrepha grandis.  " : ""}LOTE N.º: ${label.lots}`;
+  const lotLine = `${label.senaveProgram ? "Anastrepha grandis.  " : ""}LOTE N°: ${label.lots}`;
   if (pdf.getTextWidth(lotLine) > 261)
     throw new Error(
       "Los códigos de lote no caben en la etiqueta. Revise los datos.",

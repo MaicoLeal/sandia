@@ -303,7 +303,7 @@ export function Label({
                 <em>Anastrepha grandis.</em>{" "}
               </>
             )}
-            LOTE N.º: {label.lots}
+            LOTE N°: {label.lots}
           </strong>
         </footer>
       </div>

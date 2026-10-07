@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import { beforeAll, describe, expect, it } from "vitest";
 import { base, receptionTotal } from "./domain";
 import { seed } from "./test-fixtures";
-import type { Pallet } from "./types";
+import type { Pallet, ProducerHarvestReference } from "./types";
 import {
   palletLabelData,
   palletLabelEditValues,
@@ -42,6 +42,32 @@ function fixture() {
     kg: pallet.net_kg,
   });
   return { data, pallet };
+}
+
+function pdfText(pdf: jsPDF) {
+  return [...pdf.output().matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
+    .map((match) => {
+      try {
+        return inflateSync(Buffer.from(match[1], "latin1")).toString("latin1");
+      } catch {
+        return match[1];
+      }
+    })
+    .join("\n");
+}
+
+function harvestReference(
+  date = "2026-09-29",
+  status: ProducerHarvestReference["status"] = "Confirmado",
+  season = 2026,
+): ProducerHarvestReference {
+  return {
+    date,
+    status,
+    season,
+    source: "Planilla de cosecha de prueba",
+    notes: [],
+  };
 }
 
 describe("datos de la etiqueta de exportación", () => {
@@ -99,6 +125,134 @@ describe("datos de la etiqueta de exportación", () => {
       afidi: "AFIDI-123",
     });
   });
+
+  it("completa la cosecha desde una referencia confirmada del productor cuando falta en el lote", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = { harvest_reference: harvestReference() };
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-09-29");
+    expect(palletLabelData(data, pallet).harvest).toBe("29/09/2026");
+    expect(palletLabelRows(palletLabelData(data, pallet))).toContainEqual({
+      title: "FECHA DE COSECHA",
+      value: "29/09/2026",
+    });
+    expect(data.field_lots[0].harvest_date).toBeNull();
+    expect(data.receptions[0].date).toBe("2026-10-01");
+  });
+
+  it("preserva la fecha del lote y la fecha específica de la etiqueta sobre la referencia del productor", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = { harvest_reference: harvestReference() };
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-10-01");
+    expect(palletLabelData(data, pallet).harvest).toBe("01/10/2026");
+    pallet.metadata = { export_label: { harvest_date: "2026-09-28" } };
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-09-28");
+    expect(palletLabelData(data, pallet).harvest).toBe("28/09/2026");
+    expect(data.producers[0].metadata.harvest_reference?.date).toBe(
+      "2026-09-29",
+    );
+    expect(data.field_lots[0].harvest_date).toBe("2026-10-01");
+  });
+
+  it.each([
+    harvestReference("2026-09-29", "Pendiente de confirmar"),
+    harvestReference("2026-10-02"),
+    harvestReference("2026-10-29"),
+    harvestReference("2026-09-29", "Confirmado", 2025),
+    harvestReference("2026-02-30"),
+    harvestReference("29/09/2026"),
+    harvestReference(""),
+  ])(
+    "no imprime ni prellena una referencia pendiente o incompatible (%j)",
+    (reference) => {
+      const { data, pallet } = fixture();
+      data.field_lots[0].harvest_date = null;
+      data.producers[0].metadata = { harvest_reference: reference };
+      expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+      expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+      expect(data.producers[0].metadata.harvest_reference).toEqual(reference);
+    },
+  );
+
+  it("requiere una fecha de recepción válida para heredar la referencia de cosecha", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.receptions[0].date = "2026-02-30";
+    data.producers[0].metadata = { harvest_reference: harvestReference() };
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+  });
+
+  it("prellena únicamente una cosecha común y no presenta una fecha parcial como cosecha de todo el pallet", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = { harvest_reference: harvestReference() };
+    const secondProducer = {
+      ...data.producers[0],
+      ...base(pallet.organization_id),
+      name: "Otro productor de prueba",
+      metadata: { harvest_reference: harvestReference() },
+    };
+    data.producers.push(secondProducer);
+    const secondLot = {
+      ...data.field_lots[0],
+      ...base(pallet.organization_id),
+      plot_id: null,
+      producer_id: secondProducer.id,
+      code: "LOT-SECOND",
+    };
+    data.field_lots.push(secondLot);
+    const secondReception = {
+      ...data.receptions[0],
+      ...base(pallet.organization_id),
+      lot_id: secondLot.id,
+    };
+    data.receptions.push(secondReception);
+    data.pallet_items.push({
+      ...base(pallet.organization_id),
+      pallet_id: pallet.id,
+      reception_id: secondReception.id,
+      kg: 1,
+    });
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-09-29");
+    expect(palletLabelData(data, pallet).harvest).toBe("29/09/2026");
+    secondProducer.metadata.harvest_reference.date = "2026-09-30";
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelData(data, pallet).harvest).toBe(
+      "29/09/2026 / 30/09/2026",
+    );
+    secondProducer.metadata.harvest_reference.status = "Pendiente de confirmar";
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+  });
+
+  it.each(["Expedido", "Cancelado", "Vinculado a expedición"])(
+    "no incorpora una nueva referencia del productor a una etiqueta histórica (%s)",
+    (state) => {
+      const { data, pallet } = fixture();
+      data.field_lots[0].harvest_date = null;
+      data.producers[0].metadata = { harvest_reference: harvestReference() };
+      if (state === "Vinculado a expedición")
+        data.shipment_pallets.push({
+          ...base(pallet.organization_id, "Cancelado"),
+          shipment_id: "shipment-test",
+          pallet_id: pallet.id,
+        });
+      else pallet.status = state;
+      expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+      expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+      data.field_lots[0].harvest_date = "2026-10-01";
+      expect(palletLabelEditValues(data, pallet).harvest_date).toBe(
+        "2026-10-01",
+      );
+      expect(palletLabelData(data, pallet).harvest).toBe("01/10/2026");
+      pallet.metadata = { export_label: { harvest_date: "2026-09-28" } };
+      expect(palletLabelEditValues(data, pallet).harvest_date).toBe(
+        "2026-09-28",
+      );
+      expect(palletLabelData(data, pallet).harvest).toBe("28/09/2026");
+    },
+  );
   it("usa el peso neto del pallet, aunque la recepción y el bruto sean mayores", () => {
     const { data, pallet } = fixture();
     const label = palletLabelData(data, pallet);
@@ -128,11 +282,22 @@ describe("datos de la etiqueta de exportación", () => {
     expect(identity).not.toContain(data.producers[0].id);
   });
 
+  it("no estima cosecha a partir de referencias de trampa, pesaje o armado", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = { trap_reference_codes: ["SPE-GUA-002-SAN"] };
+    pallet.weighed_date = "2026-10-01";
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+    expect(palletLabelData(data, pallet).packaged).toBe("No informada");
+  });
+
   it("identifica el productor con su código interno sin sustituir el código oficial de la etiqueta", () => {
     const { data, pallet } = fixture();
     data.producers[0].metadata = {
       internal_code: " AGN-0001 ",
       export_code: "SENAVE-123",
+      trap_reference_codes: ["SPE-GUA-002-SAN"],
     };
     pallet.metadata = { export_label: { producer_code: "SENAVE-456" } };
     const label = palletLabelData(data, pallet);
@@ -149,6 +314,70 @@ describe("datos de la etiqueta de exportación", () => {
       title: "CÓDIGO DEL PRODUCTOR",
       value: "SENAVE-456",
     });
+  });
+
+  it.each([
+    {
+      name: "Elias Galeano",
+      refs: ["SPE-GUA-002-SAN"],
+      reference: "SPE-GUA-002-SAN",
+      producerOrigin: "Depto. de San Pedro – Paraguay",
+    },
+    {
+      name: "Richar Llamosas",
+      refs: [" SPE-LIB-001-SAN ", "SPE-LIB-002-SAN", "SPE-LIB-001-SAN"],
+      reference: "SPE-LIB-001-SAN / SPE-LIB-002-SAN",
+      producerOrigin: "Depto. de San Pedro – Paraguay",
+    },
+    {
+      name: "Agustin Vera",
+      refs: ["CAN-MAR-001-SAN"],
+      reference: "CAN-MAR-001-SAN",
+      producerOrigin: "Depto. de Canindeyú – Paraguay",
+    },
+  ])(
+    "hereda las referencias de trampa confirmadas de $name sin cambiar AGN ni el registro oficial",
+    ({ name, refs, reference, producerOrigin }) => {
+      const { data, pallet } = fixture();
+      const producer = data.producers[0];
+      producer.name = name;
+      producer.metadata = {
+        internal_code: "AGN-0001",
+        export_code: "REGISTRO-CONSERVADO",
+        export_origin: producerOrigin,
+        trap_reference_codes: refs,
+      };
+      data.field_lots[0].harvest_date = null;
+      const label = palletLabelData(data, pallet);
+      expect(label.producerCode).toBe(reference);
+      expect(palletLabelEditValues(data, pallet).producer_code).toBe(reference);
+      expect(label.producerInternalCode).toBe("AGN-0001");
+      expect(producer.metadata.export_code).toBe("REGISTRO-CONSERVADO");
+      expect(label.origin).toBe(producerOrigin);
+      expect(label.harvest).toBe("No informada");
+      expect(label.packaged).toBe("No informada");
+      expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+      expect(label.senaveProgram).toBe(false);
+      expect(palletLabelDeclaration(label)).not.toContain("CERTIFICACIÓN");
+      expect(palletLabelRows(label)).toHaveLength(7);
+      expect(palletLabelRows(label)).toContainEqual({
+        title: "CÓDIGO DEL PRODUCTOR",
+        value: reference,
+      });
+    },
+  );
+
+  it("usa el registro existente cuando las referencias de trampas aún no están informadas", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      export_code: " REGISTRO-123 ",
+      trap_reference_codes: ["", "  "],
+    };
+    pallet.metadata = { export_label: { producer_code: "  " } };
+    expect(palletLabelData(data, pallet).producerCode).toBe("REGISTRO-123");
+    expect(palletLabelEditValues(data, pallet).producer_code).toBe(
+      "REGISTRO-123",
+    );
   });
 
   it("muestra los códigos y el origen oficial del productor, y la cosecha real del lote", () => {
@@ -195,7 +424,7 @@ describe("datos de la etiqueta de exportación", () => {
     pallet.metadata = { export_label: { afidi: "1571652" } };
     expect(palletLabelEditValues(data, pallet).afidi).toBe("1571652");
     expect(palletLabelRows(palletLabelData(data, pallet))).toContainEqual({
-      title: "N.º DE AFIDI",
+      title: "N° DE AFIDI",
       value: "1571652",
     });
     const otherPallet: Pallet = {
@@ -216,6 +445,7 @@ describe("datos de la etiqueta de exportación", () => {
       internal_code: "AGN-0001",
       export_code: "CODE-1",
       export_origin: "San Pedro",
+      trap_reference_codes: ["SPE-GUA-002-SAN"],
     };
     const duplicate = {
       ...data.receptions[0],
@@ -235,6 +465,7 @@ describe("datos de la etiqueta de exportación", () => {
         internal_code: "AGN-0002",
         export_code: "CODE-2",
         export_origin: "Caaguazú",
+        trap_reference_codes: ["SPE-LIB-001-SAN", "SPE-LIB-002-SAN"],
       },
     };
     data.producers.push(secondProducer);
@@ -265,12 +496,21 @@ describe("datos de la etiqueta de exportación", () => {
     expect(palletLabelProducerIdentity(label)).toContain(
       "Código interno Agronorte: AGN-0001 / AGN-0002",
     );
-    expect(label.producerCode).toBe("CODE-1 / CODE-2");
+    expect(label.producerCode).toBe(
+      "SPE-GUA-002-SAN / SPE-LIB-001-SAN / SPE-LIB-002-SAN",
+    );
     expect(label.origin).toBe("San Pedro / Caaguazú");
     expect(label.lots).toBe("SAN-20261001-DEMO01 / LOT-2");
     expect(label.harvest).toBe("01/10/2026 / 03/10/2026");
     expect(label.reception).toBe("01/10/2026 / 04/10/2026");
     expect(label.netKg).toBe(390);
+    secondProducer.metadata.trap_reference_codes = [];
+    expect(palletLabelData(data, pallet).producerCode).toBe(
+      "SPE-GUA-002-SAN / CODE-2",
+    );
+    expect(palletLabelEditValues(data, pallet).producer_code).toBe(
+      "SPE-GUA-002-SAN / CODE-2",
+    );
   });
 
   it("declara el programa SENAVE solo después de una confirmación explícita", () => {
@@ -351,17 +591,7 @@ describe("PDF A4 horizontal del pallet", () => {
       expect(pdf.internal.pageSize.getHeight()).toBeCloseTo(210, 1);
       expect(pdf.output("arraybuffer").byteLength).toBeGreaterThan(1000);
       const raw = pdf.output();
-      const contents = [...raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
-        .map((match) => {
-          try {
-            return inflateSync(Buffer.from(match[1], "latin1")).toString(
-              "latin1",
-            );
-          } catch {
-            return match[1];
-          }
-        })
-        .join("\n");
+      const contents = pdfText(pdf);
       expect(contents).toContain("PAL-TEST-390");
       expect(contents).toContain("AGN-0001");
       expect(contents).toContain("SENAVE-123");
@@ -371,6 +601,40 @@ describe("PDF A4 horizontal del pallet", () => {
       expect(contents.includes("Anastrepha grandis")).toBe(senaveProgram);
     },
   );
+
+  it("imprime ambas referencias de Richar Llamosas con AFIDI, código AGN y QR en una página A4 horizontal", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].name = "Richar Llamosas";
+    data.producers[0].metadata = {
+      internal_code: "AGN-0002",
+      export_code: "REGISTRO-CONSERVADO",
+      trap_reference_codes: ["SPE-LIB-001-SAN", "SPE-LIB-002-SAN"],
+      harvest_reference: harvestReference(),
+    };
+    data.field_lots[0].harvest_date = null;
+    pallet.metadata = { export_label: { afidi: "1571652" } };
+    const label = palletLabelData(data, pallet);
+    const sizes = labelPrintFontSizes(label);
+    const measure = new jsPDF();
+    measure.setFont("helvetica", "normal");
+    measure.setFontSize(sizes[2]);
+    expect(
+      measure.splitTextToSize(label.producerCode, 126).length,
+    ).toBeLessThanOrEqual(2);
+    const pdf = createPalletLabelPdf(label, assets);
+    expect(pdf.getNumberOfPages()).toBe(1);
+    expect(pdf.internal.pageSize.getWidth()).toBeCloseTo(297, 1);
+    expect(pdf.internal.pageSize.getHeight()).toBeCloseTo(210, 1);
+    const contents = pdfText(pdf);
+    expect(contents).toContain("SPE-LIB-001-SAN");
+    expect(contents).toContain("SPE-LIB-002-SAN");
+    expect(contents).toContain("AGN-0002");
+    expect(contents).toContain("1571652");
+    expect(contents).toContain("29/09/2026");
+    expect(pdf.output()).toContain("/Subtype /Image");
+    expect(contents).not.toContain("Anastrepha grandis");
+    expect(data.producers[0].metadata.export_code).toBe("REGISTRO-CONSERVADO");
+  });
 
   it("solo permite la declaración SENAVE para destino Uruguay confirmado", () => {
     const { data, pallet } = fixture();

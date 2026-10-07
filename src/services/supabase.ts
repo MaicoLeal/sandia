@@ -7,6 +7,7 @@ import type {
   RecipientPallet,
   RecipientAccount,
   PalletExportLabel,
+  TrapInstallation,
 } from "../types";
 import { getFile } from "./storage";
 import type { PalletCorrectionValues } from "../pallet-corrections";
@@ -71,23 +72,31 @@ export async function loadRemote(): Promise<Workspace> {
     "attachments",
     "audit_logs",
   ] as const;
-  const results = await Promise.all(
-    tables.map(async (table) => {
-      const rows: unknown[] = [];
-      for (let offset = 0; ; offset += 500) {
-        const response = await supabase!
-          .from(table)
-          .select("*")
-          .eq("organization_id", profile.organization_id)
-          .order("id")
-          .range(offset, offset + 499);
-        if (response.error) throw response.error;
-        rows.push(...response.data);
-        if (response.data.length < 500) break;
-      }
-      return [table, rows] as const;
-    }),
-  );
+  const readRows = async (table: string) => {
+    const rows: unknown[] = [];
+    for (let offset = 0; ; offset += 500) {
+      const response = await supabase!
+        .from(table)
+        .select("*")
+        .eq("organization_id", profile.organization_id)
+        .order("id")
+        .range(offset, offset + 499);
+      if (response.error) throw response.error;
+      rows.push(...response.data);
+      if (response.data.length < 500) break;
+    }
+    return rows;
+  };
+  // These source records are read-only and never part of sync_workspace's
+  // client write payload. Fetch only after the server advertises the migration.
+  const [results, trapInstallations] = await Promise.all([
+    Promise.all(
+      tables.map(async (table) => [table, await readRows(table)] as const),
+    ),
+    !capabilities.error && capabilities.data?.trap_installations
+      ? readRows("trap_installations")
+      : Promise.resolve([]),
+  ]);
   const latest = await supabase
     .from("organizations")
     .select("revision")
@@ -101,6 +110,7 @@ export async function loadRemote(): Promise<Workspace> {
   return {
     features: capabilities.error ? {} : capabilities.data,
     data: Object.fromEntries(results) as unknown as Data,
+    trapInstallations: trapInstallations as TrapInstallation[],
     revision: organization.revision,
     pending: false,
     localOnly: false,

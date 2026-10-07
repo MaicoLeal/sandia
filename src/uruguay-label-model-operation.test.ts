@@ -1,0 +1,359 @@
+import { readFileSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+
+const operation = readFileSync(
+  new URL(
+    "../supabase/operations/20261007_uruguay_label_model.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const org = "20000000-0000-4000-8000-000000000001";
+const otherOrg = "20000000-0000-4000-8000-000000000002";
+const creator = "30000000-0000-4000-8000-000000000001";
+const db = new PGlite();
+const palletId = (number: number) =>
+  `40000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+type PalletSnapshot = {
+  id: string;
+  code: string;
+  token: string;
+  net_kg: number;
+  gross_kg: number;
+  tare_kg: number;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  updated_at: string;
+  created_by: string;
+};
+
+beforeAll(async () => {
+  await db.exec(`
+    create role anon; create role authenticated;
+    create schema auth; create table auth.users(id uuid primary key,email text);
+    create function auth.uid() returns uuid language sql stable as
+      $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+    grant usage on schema auth to authenticated,anon;
+    grant execute on function auth.uid() to authenticated,anon;
+    create schema storage;
+    create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+    create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);
+    alter table storage.objects enable row level security;
+    create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;
+    grant usage on schema storage to authenticated;
+    grant select on storage.objects to authenticated;
+  `);
+  for (const migration of [
+    "202610020001_sandia.sql",
+    "202610020002_producer_corrections.sql",
+    "202610020003_real_intake.sql",
+    "202610020004_reception_date_correction.sql",
+    "202610020005_operational_intake_trace.sql",
+    "202610020006_regional_loss_observations.sql",
+    "20261005165516_recipient_access_reception_edit.sql",
+    "20261005225807_pallet_export_label.sql",
+    "20261006131819_pallet_label_details.sql",
+    "20261006141341_pallet_corrections.sql",
+    "20261006163006_reception_management_pallet_tare.sql",
+  ]) {
+    await db.exec(
+      readFileSync(
+        new URL(`../supabase/migrations/${migration}`, import.meta.url),
+        "utf8",
+      ),
+    );
+  }
+  await db.query(
+    "insert into auth.users(id,email) values($1,'original@test.invalid')",
+    [creator],
+  );
+  await db.query(
+    "insert into organizations(id,name,revision) values($1,'Cooperativa Agronorte',7),($2,'Otra cooperativa',3)",
+    [org, otherOrg],
+  );
+  await db.query(
+    "insert into profiles(organization_id,user_id,name,role) values($1,$2,'Operador original','administrador')",
+    [org, creator],
+  );
+}, 30000);
+
+afterAll(async () => await db.close());
+
+async function pallets() {
+  const result = await db.query<{ value: PalletSnapshot }>(
+    "select to_jsonb(p) as value from public.pallets p order by id",
+  );
+  return result.rows.map((row) => row.value);
+}
+async function revision(organization = org) {
+  const result = await db.query<{ revision: number }>(
+    "select revision from organizations where id=$1",
+    [organization],
+  );
+  return result.rows[0].revision;
+}
+async function auditCount() {
+  const result = await db.query<{ count: number }>(
+    "select count(*)::int as count from audit_logs",
+  );
+  return result.rows[0].count;
+}
+async function insertPallet(
+  number: number,
+  overrides: {
+    status?: string;
+    destination?: string;
+    organization?: string;
+    createdAt?: string;
+    metadata?: Record<string, unknown> | null;
+  } = {},
+) {
+  const metadata =
+    overrides.metadata === undefined
+      ? { export_label: { afidi: "1571652" } }
+      : overrides.metadata;
+  await db.query(
+    `insert into pallets(id,organization_id,code,destination,assembled_at,weighed_date,responsible,gross_kg,net_kg,tare_kg,status,created_at,updated_at,created_by,fruit_count,notes,metadata)
+     values($1,$2,$3,$4,'2026-10-01T15:00:00Z','2026-10-01','Responsable original',432,390,42,$5,$6,'2026-10-01T15:00:00Z',$7,100,'Observación original',$8::jsonb)`,
+    [
+      palletId(number),
+      overrides.organization ?? org,
+      `PAL-ORIGINAL-${number}`,
+      overrides.destination ?? "Uruguay",
+      overrides.status ?? "En armado",
+      overrides.createdAt ?? "2026-10-01T15:00:00Z",
+      creator,
+      metadata === null ? null : JSON.stringify(metadata),
+    ],
+  );
+}
+
+beforeEach(async () => {
+  await db.exec("rollback");
+  await db.exec(
+    "delete from shipment_pallets; delete from shipments; delete from pallets; delete from audit_logs;",
+  );
+  await db.query(
+    "update organizations set name='Cooperativa Agronorte',revision=7 where id=$1",
+    [org],
+  );
+  await db.exec("select set_config('request.jwt.claim.sub','',false)");
+  await insertPallet(1);
+  await insertPallet(2, {
+    status: "Etiquetado",
+    destination: " URUGUAY ",
+    metadata: {
+      packing_note: "Preservar este dato",
+      export_label: {
+        afidi: "1571652",
+        producer_code: "SPE-LIB-001-SAN / SPE-LIB-002-SAN",
+        origin: "Depto. de San Pedro – Paraguay",
+        harvest_date: "2026-09-29",
+        packaged_date: "2026-10-01",
+        senave_program: false,
+      },
+    },
+  });
+  await insertPallet(3, {
+    status: "Listo para carga",
+    createdAt: "2026-10-07T13:07:38Z",
+  });
+  await insertPallet(4, {
+    status: "Listo para carga",
+    metadata: { export_label: { afidi: "1571652", senave_program: true } },
+  });
+  await insertPallet(5, { createdAt: "2026-10-07T13:07:38.001Z" });
+  await insertPallet(6, { destination: "Argentina" });
+  await insertPallet(7, { destination: "Pendiente de confirmar" });
+  await insertPallet(8, { organization: otherOrg });
+  await insertPallet(9, { status: "Expedido" });
+  await insertPallet(10, { status: "Cancelado" });
+  await insertPallet(11);
+  await insertPallet(12, {
+    metadata: { export_label: { afidi: "OTRO-AFIDI" } },
+  });
+  await insertPallet(13, { metadata: { packing_note: "Sin AFIDI informado" } });
+  await insertPallet(14, { metadata: null });
+  await db.query(
+    `insert into shipments(id,organization_id,destination,country,driver,plate,departure,responsible,status)
+    values('50000000-0000-4000-8000-000000000001',$1,'Uruguay','Uruguay','Conductor','ABC123','2026-10-07','Responsable','Cancelado')`,
+    [org],
+  );
+  await db.query(
+    `insert into shipment_pallets(id,organization_id,shipment_id,pallet_id,status)
+    values('60000000-0000-4000-8000-000000000001',$1,'50000000-0000-4000-8000-000000000001',$2,'Cancelado')`,
+    [org, palletId(11)],
+  );
+  await db.exec("delete from audit_logs");
+});
+
+describe.sequential(
+  "modelo solicitado de etiqueta para los pallets actuales de Uruguay",
+  () => {
+    it("aplica las tres etapas activas con AFIDI confirmado y conserva todos los demás datos", async () => {
+      const before = await pallets();
+      await db.exec(operation);
+      const after = await pallets();
+      for (let index = 0; index < 3; index++) {
+        expect(after[index]).toEqual({
+          ...before[index],
+          metadata: {
+            ...before[index].metadata,
+            export_label: {
+              ...(before[index].metadata?.export_label as Record<
+                string,
+                unknown
+              >),
+              senave_program: true,
+            },
+          },
+          status: "En armado",
+          updated_at: after[index].updated_at,
+        });
+        expect(after[index].updated_at).not.toBe(before[index].updated_at);
+      }
+      // Already enabled, future, different destination/tenant/AFIDI, closed,
+      // shipment-linked and missing AFIDI records all remain byte-for-byte equal.
+      expect(after.slice(3)).toEqual(before.slice(3));
+      expect(await revision()).toBe(8);
+      expect(await revision(otherOrg)).toBe(3);
+    });
+
+    it.each([false, true])(
+      "audita antes/después, motivo de la imagen y el actor real del servidor (sesión %s)",
+      async (authenticated) => {
+        if (authenticated)
+          await db.query(
+            "select set_config('request.jwt.claim.sub',$1,false)",
+            [creator],
+          );
+        await db.exec(operation);
+        const logs = await db.query<{
+          actor: string;
+          created_by: string | null;
+          reason: string;
+          before: PalletSnapshot;
+          after: PalletSnapshot;
+        }>(
+          `select actor,created_by,reason,"before","after" from audit_logs order by entity_id`,
+        );
+        expect(logs.rows).toHaveLength(3);
+        for (const log of logs.rows) {
+          expect(log.actor).toBe(
+            authenticated ? "Operador original" : "Administrador del servidor",
+          );
+          expect(log.created_by).toBe(authenticated ? creator : null);
+          expect(log.reason).toBe(
+            "Modelo de etiqueta SENAVE/Uruguay solicitado por el propietario según imagen enviada el 07/10/2026.",
+          );
+          expect(log.before.metadata?.export_label).not.toMatchObject({
+            senave_program: true,
+          });
+          expect(log.after.metadata?.export_label).toMatchObject({
+            afidi: "1571652",
+            senave_program: true,
+          });
+          expect(log.after.created_by).toBe(creator);
+        }
+      },
+    );
+
+    it("es idempotente y no extiende el modelo a pallets creados después del corte", async () => {
+      await db.exec(operation);
+      const first = await pallets();
+      await db.exec(operation);
+      expect(await pallets()).toEqual(first);
+      expect(await revision()).toBe(8);
+      expect(await auditCount()).toBe(3);
+      await insertPallet(15, { createdAt: "2026-10-08T12:00:00Z" });
+      const future = (await pallets()).find(
+        (pallet) => pallet.id === palletId(15),
+      );
+      await db.exec(operation);
+      expect(
+        (await pallets()).find((pallet) => pallet.id === palletId(15)),
+      ).toEqual(future);
+      expect(await revision()).toBe(8);
+      // Only insertion itself adds an audit record; reapplying the model adds none.
+      expect(await auditCount()).toBe(4);
+    });
+
+    it("rechaza un proyecto incorrecto, soporte de etiquetas ausente o auditoría desactivada", async () => {
+      for (const [damage, message] of [
+        [
+          "alter table pallets rename to unrelated_pallets",
+          "no existe en este proyecto",
+        ],
+        [
+          "update organizations set name='Otra empresa' where id='" + org + "'",
+          "no es la organización",
+        ],
+        [
+          "drop function public.update_pallet_export_label(uuid,jsonb,text,bigint)",
+          "actualización de etiquetas",
+        ],
+        [
+          "alter table pallets drop column metadata",
+          "actualización de etiquetas",
+        ],
+        [
+          "drop function agronorte_private.valid_export_label(jsonb) cascade",
+          "actualización de etiquetas",
+        ],
+        [
+          "alter table pallets disable trigger audit_change",
+          "auditoría de pallets",
+        ],
+      ]) {
+        const before = await pallets();
+        await db.exec("begin");
+        await db.exec(damage);
+        await expect(db.exec(operation)).rejects.toThrow(message);
+        await db.exec("rollback");
+        expect(await pallets()).toEqual(before);
+        expect(await revision()).toBe(7);
+        expect(await auditCount()).toBe(0);
+      }
+    });
+
+    it.each([
+      "[]",
+      '{"export_label":"incorrecto"}',
+      '{"export_label":{"afidi":"1571652","harvest_date":"2026-02-30"}}',
+      '{"export_label":{"afidi":"1571652","senave_program":"false"}}',
+    ])(
+      "revierte cambios previos si una etiqueta posterior está dañada (%s)",
+      async (malformed) => {
+        await db.exec("begin");
+        await db.exec(
+          "alter table pallets drop constraint pallets_export_metadata_check",
+        );
+        await db.query("update pallets set metadata=$1::jsonb where id=$2", [
+          malformed,
+          palletId(3),
+        ]);
+        await db.exec("delete from audit_logs");
+        const before = await pallets();
+        await db.exec("commit");
+        await expect(db.exec(operation)).rejects.toThrow("inválidos en pallet");
+        await db.exec("rollback");
+        expect(await pallets()).toEqual(before);
+        expect(await revision()).toBe(7);
+        expect(await auditCount()).toBe(0);
+        await db.query("update pallets set metadata=$1::jsonb where id=$2", [
+          JSON.stringify({ export_label: { afidi: "1571652" } }),
+          palletId(3),
+        ]);
+        await db.exec("delete from audit_logs");
+        await db.exec(`alter table pallets add constraint pallets_export_metadata_check check (
+      metadata is null or (
+        jsonb_typeof(metadata)='object' and length(metadata::text)<=4096
+        and agronorte_private.valid_export_label(metadata->'export_label')
+        and (metadata#>'{export_label,senave_program}' is distinct from 'true'::jsonb or lower(trim(destination))='uruguay')
+      )
+    )`);
+      },
+    );
+  },
+);

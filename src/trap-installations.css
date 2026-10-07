@@ -1,0 +1,208 @@
+.trap-installations-panel {
+  min-width: 0;
+  margin-top: 24px;
+  color: #243321;
+}
+
+.trap-installations-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.trap-installations-heading > div {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.trap-installations-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--green, #36741b);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.trap-installations-heading p,
+.trap-installations-empty {
+  color: #65745b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.trap-installations-count {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: #edf4e6;
+  color: var(--green, #36741b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trap-installations-empty {
+  padding: 16px;
+  border: 1px solid var(--border, #e3e9de);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.trap-installations-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trap-installation {
+  min-width: 0;
+  border: 1px solid var(--border, #e3e9de);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.trap-installation > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 64px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  list-style: none;
+  touch-action: manipulation;
+}
+
+.trap-installation > summary::-webkit-details-marker {
+  display: none;
+}
+
+.trap-installation > summary::marker {
+  content: "";
+}
+
+.trap-installation > summary:focus-visible {
+  outline: 3px solid #ffc60f;
+  outline-offset: 3px;
+}
+
+.trap-installation > summary > svg {
+  color: var(--green, #36741b);
+}
+
+.trap-installation[open] > summary > svg {
+  transform: rotate(180deg);
+}
+
+.trap-installation-summary-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trap-installation-summary-text strong {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.trap-installation-summary-text > span {
+  color: #65745b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trap-installation-body {
+  padding: 0 16px 16px;
+  overflow-wrap: anywhere;
+}
+
+.trap-installation-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px 20px;
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #e3e9de);
+}
+
+.trap-installation-fields > div,
+.trap-installation-coordinates dl > div {
+  min-width: 0;
+}
+
+.trap-installation-fields dt,
+.trap-installation-coordinates dt {
+  margin-bottom: 3px;
+  color: #65745b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trap-installation-fields dd,
+.trap-installation-coordinates dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.trap-installation-coordinates {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border, #e3e9de);
+  border-radius: 8px;
+  background: #f8faf5;
+}
+
+.trap-installation-coordinates > p {
+  margin-bottom: 9px;
+  color: #65745b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.trap-installation-coordinates dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.trap-installation-coordinates dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.trap-installation-source,
+.trap-installation-notes {
+  margin-top: 14px;
+  color: #65745b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.trap-installation-source p + p {
+  margin-top: 3px;
+}
+
+.trap-installation-notes > p {
+  font-weight: 600;
+}
+
+.trap-installation-notes ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.trap-installation-notes li + li {
+  margin-top: 5px;
+}
+
+@media (min-width: 560px) {
+  .trap-installation-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

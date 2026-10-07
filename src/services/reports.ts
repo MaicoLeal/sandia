@@ -79,6 +79,7 @@ export function printReport(
   title: string,
   headers: string[],
   rows: (string | number)[][],
+  options?: { landscape?: boolean; weightCaption?: boolean },
 ) {
   const win = window.open("", "_blank");
   if (!win) throw new Error("Permita ventanas emergentes para imprimir.");
@@ -89,7 +90,7 @@ export function printReport(
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
   win.document.write(
-    `<html lang="es"><head><title>${esc(title)}</title><style>body{font:14px Arial;padding:24px;color:#183414}h1{font-size:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:9px;text-align:left}@page{margin:15mm}</style></head><body><h1>Cooperativa Agronorte</h1><h2>${esc(title)}</h2><p>${esc(dateLabel(new Date().toISOString()))} · Peso en kg</p><table><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(typeof c === "number" ? kg(c) : c)}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`,
+    `<html lang="es"><head><title>${esc(title)}</title><style>body{font:14px Arial;padding:24px;color:#183414}h1{font-size:24px}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{border-bottom:1px solid #ccc;padding:9px;text-align:left;overflow-wrap:anywhere}@page{margin:15mm;${options?.landscape ? "size:A4 landscape;" : ""}}</style></head><body><h1>Cooperativa Agronorte</h1><h2>${esc(title)}</h2><p>${esc(dateLabel(new Date().toISOString()))}${options?.weightCaption === false ? " · Fechas de instalación" : " · Peso en kg"}</p><table><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((c) => `<td>${esc(typeof c === "number" ? kg(c) : c)}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`,
   );
   win.document.close();
   win.focus();
