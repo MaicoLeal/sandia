@@ -18,7 +18,7 @@ O proprietário reconfirmou **colheita 02/10/2026** e **recepção 01/10/2026**.
 
 ## Atualização nos dispositivos
 
-Guarde formulários abertos e sincronize as entradas pendentes. Em Configuración, use Verificar actualización e, quando oferecido, Actualizar aplicación. Confira a versão 2026.10.07-11. Depois atualize os dados e abra Pallets → produtor → Etiqueta / QR. Confira a revisão de campos e gere novamente as etiquetas alteradas. Não é necessário limpar o armazenamento do celular.
+Guarde formulários abertos. Em Configuración, use Verificar actualización e, quando oferecido, Actualizar aplicación. Confira a versão 2026.10.07-12. No computador, Ctrl + Shift + R também carrega a publicação atual. Entre com a conta e abra Pallets → produtor → Etiqueta / QR. Não é necessário limpar o armazenamento do celular.
 
 ## Conferência real e impressão imediata
 
@@ -41,3 +41,15 @@ Na versão **2026.10.07-11**, **Sincronizar** pode recuperar o conflito de revis
 Antes de reenviar, guarda uma cópia do espaço, arquivos locais e rascunhos em uma transação IndexedDB. A tentativa usa a revisão atual e é repetida somente uma vez; uma nova concorrência permanece protegida pela função do banco. As trocas de cache verificam também alterações em outra aba. Após um envio confirmado e falha na leitura, mantém a revisão confirmada e tenta somente consultar, evitando reenviar os mesmos registros.
 
 No aparelho de origem, use **Configuración → Descargar respaldo local**, salve formulários abertos e carregue a versão atual. No computador, **Ctrl + Shift + R** atualiza a página; no aplicativo do celular, feche as janelas do sistema e abra novamente com internet. Toque **Sincronizar** no mesmo aparelho em que os novos dados foram lançados. O computador recebe os registros depois que o envio for confirmado. Não limpe o armazenamento nem use **Actualizar datos para imprimir** para descartar entradas novas: essa recuperação continua bloqueada quando há novos registros locais.
+
+## Gravação pela conta e impressão — versão 2026.10.07-12
+
+Por orientação do proprietário, o fluxo atual usa os registros do Supabase vinculados à conta e organização. Novos lançamentos online só retornam sucesso depois da confirmação do servidor; não exigem o botão Sincronizar. O botão passa a Atualizar datos. O aplicativo consulta novamente os dados ao recuperar foco e a cada minuto enquanto está visível. Para salvar com a conta é necessária conexão; formulários de recepção continuam com respaldo do rascunho.
+
+O cache account:<user> é separado da cópia anterior cloud:<user>. A cópia anterior não é apagada, substituída ou reenviada automaticamente. Se contém registros pendentes, o sistema avisa que o respaldo existe e oferece seu download em Configuración. Isso permite editar os registros confirmados sem impor uma conciliação à sessão de impressão. A separação não transforma registros anteriores sem envio em recebimentos confirmados no servidor.
+
+Corregir total recibido abre diretamente Total recibido (kg), com foco e teclado decimal; em várias recepções, o usuário escolhe a entrega correta. Guardar total recibido usa a revisão atual do servidor e não solicita justificativa. Conserva o histórico e os dados remotos que não foram modificados no formulário, recalcula perdas/saldo e preserva pesos e QR dos pallets. A seleção de recepção e os limites de saldo/expedição continuam aplicáveis.
+
+Imprimir A4, Descargar PDF A4 e Descargar QR ficam disponíveis sem esperar uma sincronização. Pallets cancelados e perfis sem permissão continuam protegidos. A solicitação de impressão é guardada separadamente e auditada em segundo plano por record_pallet_label_print, idempotente por intenção/conta/pallet. Não envia snapshots do aparelho. A atualização SQL de auditoria foi aplicada diretamente no projeto Sandía e verificou-se acesso autenticado, ausência de acesso anônimo e conservação dos 34 pallets e 12.489 kg existentes.
+
+Validações: lint, TypeScript/build, testes unitários e de banco; QA isolado a 375 px para edição direta, revisão fresca, campos remotos preservados, impressão com rede indisponível/pendências/operação em curso e permissões. Esses testes usam dados fictícios isolados; não lançam recebimentos ou correções no banco de produção.

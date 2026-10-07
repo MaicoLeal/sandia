@@ -3,6 +3,7 @@ import { inflateSync } from "node:zlib";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
 import { createElement } from "react";
+import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Label } from "./components";
@@ -62,13 +63,17 @@ function pdfText(pdf: jsPDF) {
     .join("\n");
 }
 
-function labelMarkup(data: ReturnType<typeof fixture>["data"], pallet: Pallet) {
+function labelMarkup(
+  data: ReturnType<typeof fixture>["data"],
+  pallet: Pallet,
+  props: Partial<Omit<ComponentProps<typeof Label>, "data" | "pallet">> = {},
+) {
   vi.stubGlobal("window", {
     location: { origin: "https://example.invalid", pathname: "/" },
   });
   try {
     return renderToStaticMarkup(
-      createElement(Label, { data, pallet, onPrinted: async () => {} }),
+      createElement(Label, { data, pallet, onPrinted: async () => {}, ...props }),
     );
   } finally {
     vi.unstubAllGlobals();
@@ -90,6 +95,32 @@ function harvestReference(
 }
 
 describe("datos de la etiqueta de exportación", () => {
+  it("conserva los datos de la etiqueta pendiente e informa que puede imprimirse sin sincronización manual", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: {
+        afidi: "1571652",
+        harvest_date: "2026-09-29",
+        packaged_date: "2026-10-01",
+        senave_program: true,
+        importer_name: "IMPORTADOR DE PRUEBA",
+        importer_address: "DIRECCIÓN DE PRUEBA, URUGUAY",
+      },
+    };
+    const before = structuredClone({ data, pallet });
+    const html = labelMarkup(data, pallet, { pending: true, busy: true });
+    expect(html).toContain("Impresión disponible con los datos guardados aquí");
+    expect(html).toContain("sin esperar el envío");
+    expect(html).toContain("consulta desde otro celular");
+    expect(html).not.toContain("Confirme los datos en Supabase antes de imprimir");
+    expect(html).not.toContain("Actualizar datos para imprimir");
+    expect(html).toContain("1571652");
+    expect(html).toContain("IMPORTADOR DE PRUEBA");
+    expect(html).toContain(pallet.code);
+    expect(html).toContain("390");
+    expect(html.match(/<th scope="row">/g)).toHaveLength(7);
+    expect({ data, pallet }).toEqual(before);
+  });
   it("revisa todos los datos de Uruguay sin inventar valores ni restar otra vez los 42 kg de tara", () => {
     const { data, pallet } = fixture();
     data.producers[0].metadata = {

@@ -158,10 +158,6 @@ export function Label({
   onPrinted,
   pending = false,
   busy = false,
-  online = true,
-  syncError = "",
-  onSync,
-  onUseServerData,
   onEditExport,
   editActivationPending = false,
 }: {
@@ -170,10 +166,6 @@ export function Label({
   onPrinted: () => Promise<void>;
   pending?: boolean;
   busy?: boolean;
-  online?: boolean;
-  syncError?: string;
-  onSync?: () => Promise<void>;
-  onUseServerData?: () => Promise<void>;
   onEditExport?: () => void;
   editActivationPending?: boolean;
 }) {
@@ -372,44 +364,16 @@ export function Label({
       {pending && (
         <div className="setting-info no-print" role="status">
           <div>
-            <strong>
-              {busy ? "Sincronizando…" : "Etiqueta pendiente de sincronizar"}
-            </strong>
+            <strong>Impresión disponible con los datos guardados aquí</strong>
             <p>
-              {online
-                ? "Confirme los datos en Supabase antes de imprimir o descargar el QR."
-                : "Conecte el celular a internet. Sus datos siguen guardados en este dispositivo."}
+              Puede imprimir o descargar esta etiqueta sin esperar el envío de
+              los registros. Los cambios se enviarán automáticamente cuando haya
+              conexión.
             </p>
-            {onSync && (
-              <button
-                className="button secondary"
-                disabled={busy || !online}
-                onClick={() => void onSync()}
-              >
-                Sincronizar
-              </button>
-            )}
-            {onUseServerData && (
-              <>
-                <p>
-                  Para imprimir datos ya guardados, cargue la versión del
-                  servidor. Primero se conserva una copia local; los registros
-                  nuevos se protegen.
-                </p>
-                <button
-                  className="button secondary"
-                  disabled={busy || !online}
-                  onClick={() => void onUseServerData()}
-                >
-                  Actualizar datos para imprimir
-                </button>
-              </>
-            )}
-            {syncError && (
-              <p className="error" role="alert">
-                {syncError}
-              </p>
-            )}
+            <p className="hint">
+              Si el QR es nuevo, la consulta desde otro celular estará
+              disponible después del envío. Su código se conserva.
+            </p>
           </div>
         </div>
       )}
@@ -422,20 +386,20 @@ export function Label({
         <button
           className="button primary"
           onClick={() => void print()}
-          disabled={!qr || cancelled || pending || busy || preparingPdf}
+          disabled={!qr || cancelled || preparingPdf}
         >
           <Printer size={18} />
           Imprimir A4
         </button>
         <button
           className="button secondary"
-          disabled={!qr || cancelled || pending || busy || preparingPdf}
+          disabled={!qr || cancelled || preparingPdf}
           onClick={() => void downloadPdf()}
         >
           <Download size={18} />
           {preparingPdf ? "Preparando PDF…" : "Descargar PDF A4"}
         </button>
-        {qr && !cancelled && !pending && !busy && !preparingPdf && (
+        {qr && !cancelled && !preparingPdf && (
           <a
             className="button secondary"
             download={pallet.code + "-qr.png"}

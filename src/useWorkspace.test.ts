@@ -152,14 +152,14 @@ describe("sincronización sin descartar registros locales", () => {
     expect(mocks.sync).toHaveBeenNthCalledWith(2, rebased);
     expect(mocks.archive).toHaveBeenNthCalledWith(
       1,
-      "cloud:operator-a",
+      "account:operator-a",
       pending,
       rebased,
     );
     expect(mocks.archive).toHaveBeenCalledOnce();
     expect(mocks.replace).toHaveBeenNthCalledWith(
       1,
-      "cloud:operator-a",
+      "account:operator-a",
       rebased,
       acknowledged,
     );
@@ -168,7 +168,7 @@ describe("sincronización sin descartar registros locales", () => {
     );
     expect(mocks.replace).toHaveBeenNthCalledWith(
       2,
-      "cloud:operator-a",
+      "account:operator-a",
       acknowledged,
       final,
     );
@@ -268,7 +268,7 @@ describe("sincronización sin descartar registros locales", () => {
     expect(mocks.sync).not.toHaveBeenCalled();
     expect(mocks.save).not.toHaveBeenCalled();
     expect(mocks.archive).toHaveBeenCalledExactlyOnceWith(
-      "cloud:operator-a",
+      "account:operator-a",
       local,
       confirmed,
     );
@@ -351,7 +351,7 @@ describe("sincronización sin descartar registros locales", () => {
 
     expect(mocks.sync).toHaveBeenCalledOnce();
     expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
-      "cloud:operator-a",
+      "account:operator-a",
       pending,
       acknowledged,
     );
@@ -386,7 +386,7 @@ describe("sincronización sin descartar registros locales", () => {
     await useLoadedWorkspace(refresh).sync();
     expect(mocks.sync).not.toHaveBeenCalled();
     expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refresh,
       confirmed,
     );
@@ -404,7 +404,7 @@ describe("sincronización sin descartar registros locales", () => {
     await hook.reload();
 
     expect(mocks.replace).toHaveBeenCalledExactlyOnceWith(
-      "cloud:operator-a",
+      "account:operator-a",
       cache,
       cache,
     );
@@ -434,12 +434,12 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     };
     expect(mocks.replace).toHaveBeenNthCalledWith(
       1,
-      "cloud:operator-a",
+      "account:operator-a",
       cache,
       refreshing,
     );
     expect(mocks.replace).toHaveBeenLastCalledWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refreshing,
       confirmed,
     );
@@ -463,10 +463,14 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
       "Su sesión o acceso cambió",
     );
     expect(mocks.remote).not.toHaveBeenCalled();
-    expect(mocks.replace).toHaveBeenLastCalledWith("cloud:operator-a", cache, {
-      ...cache,
-      needsRefresh: true,
-    });
+    expect(mocks.replace).toHaveBeenLastCalledWith(
+      "account:operator-a",
+      cache,
+      {
+        ...cache,
+        needsRefresh: true,
+      },
+    );
   });
   it("no guarda una respuesta remota perteneciente a otra cuenta", async () => {
     const other = {
@@ -479,12 +483,12 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     );
     const refreshing = { ...cache, needsRefresh: true };
     expect(mocks.replace).not.toHaveBeenCalledWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refreshing,
       other,
     );
     expect(mocks.replace).toHaveBeenLastCalledWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refreshing,
       {
         ...cache,
@@ -515,7 +519,7 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     );
     const refreshing = { ...cache, needsRefresh: true };
     expect(mocks.replace).toHaveBeenLastCalledWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refreshing,
       {
         ...cache,
@@ -534,7 +538,7 @@ describe("confirmación de etiqueta e identidad del espacio", () => {
     );
     const refreshing = { ...cache, needsRefresh: true };
     expect(mocks.replace).toHaveBeenLastCalledWith(
-      "cloud:operator-a",
+      "account:operator-a",
       refreshing,
       {
         ...cache,

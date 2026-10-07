@@ -109,6 +109,16 @@ export async function saveDraft(key: string, value: unknown) {
 export async function readDraft<T>(key: string): Promise<T | undefined> {
   return (await db).get("drafts", key);
 }
+export async function readDraftEntries<T>(prefix: string) {
+  const database = await db;
+  const tx = database.transaction("drafts", "readonly");
+  const entries: { key: string; value: T }[] = [];
+  for (const key of await tx.store.getAllKeys())
+    if (String(key).startsWith(prefix))
+      entries.push({ key: String(key), value: (await tx.store.get(key)) as T });
+  await tx.done;
+  return entries;
+}
 export async function clearDraft(key: string) {
   await (await db).delete("drafts", key);
 }

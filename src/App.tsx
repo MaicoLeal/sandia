@@ -71,6 +71,7 @@ import { ReceptionManagement } from "./ReceptionManagement";
 import {
   applyReceptionManagement,
   assertReceptionManagement,
+  receptionManagementImpact,
 } from "./reception-management";
 import type { ReceptionManagementValues } from "./reception-management";
 import {
@@ -139,7 +140,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-11 · Corrección y sincronización de recepciones";
+const appVersion = "2026.10.07-12 · Guardado por cuenta e impresión libre";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -422,8 +423,11 @@ function WorkspaceApp() {
     setError,
     busy,
     online,
+    localBackup,
     commit,
+    recordPalletPrint,
     sync,
+    runCloudAction,
     useServerData: recoverPrintData,
     role,
   } = useWorkspace();
@@ -445,6 +449,9 @@ function WorkspaceApp() {
   const [editingReceptionRevision, setEditingReceptionRevision] = useState<
     number | null
   >(null);
+  const [editingReceptionMode, setEditingReceptionMode] = useState<
+    "weights" | "total"
+  >("weights");
   const receptionSaveLock = useRef(false);
   const [receptionSaving, setReceptionSaving] = useState(false);
   const [showCancelledReceptions, setShowCancelledReceptions] = useState(false);
@@ -470,6 +477,7 @@ function WorkspaceApp() {
     setEditingProducerId(null);
     setEditingReceptionId(null);
     setEditingReceptionRevision(null);
+    setEditingReceptionMode("weights");
     setReturnToReception(false);
     setLabel(null);
     setEditingPalletId(null);
@@ -612,7 +620,9 @@ function WorkspaceApp() {
   };
   const run = async (
     action: () => Promise<void>,
-    success = "Registro guardado en este dispositivo.",
+    success = workspace.localOnly
+      ? "Registro guardado en este dispositivo."
+      : "Registro guardado en su cuenta.",
   ) => {
     setError("");
     try {
@@ -717,18 +727,22 @@ function WorkspaceApp() {
   const receptionManagementEnabled =
     workspace.localOnly || Boolean(workspace.features?.reception_management);
   const receptionManagementBlocked =
-    editingReceptionRevision !== workspace.revision
+    workspace.localOnly && editingReceptionRevision !== workspace.revision
       ? "Los datos cambiaron. Cierre y abra nuevamente la recepción antes de corregir."
       : !can(role, "correct")
         ? "Solo un administrador o gestor puede corregir o cancelar recepciones."
-        : !workspace.localOnly &&
-            (!online || workspace.pending || workspace.needsRefresh)
-          ? "Conéctese y sincronice los registros pendientes antes de corregir la recepción."
+        : !workspace.localOnly && !online
+          ? "Conéctese para guardar la corrección de esta recepción."
           : "";
-  const openReceptionManagement = (id: string, action: "edit" | "cancel") => {
+  const openReceptionManagement = (
+    id: string,
+    action: "edit" | "cancel",
+    mode: "weights" | "total" = "weights",
+  ) => {
     setError("");
     setEditingReceptionId(id);
     setEditingReceptionRevision(workspace.revision);
+    setEditingReceptionMode(mode);
     setDialog(action === "edit" ? "edit_reception" : "cancel_reception");
   };
   const saveReceptionManagement = async (values: ReceptionManagementValues) => {
@@ -741,8 +755,8 @@ function WorkspaceApp() {
       if (receptionManagementBlocked)
         throw new Error(receptionManagementBlocked);
       if (!editingReception) throw new Error("Abra nuevamente la recepción.");
-      assertReceptionManagement(data, editingReception, values);
       if (workspace.localOnly) {
+        assertReceptionManagement(data, editingReception, values);
         await commit((draft) =>
           applyReceptionManagement(
             draft,
@@ -758,14 +772,165 @@ function WorkspaceApp() {
             "Active la actualización SQL de recepciones y tara en Supabase.",
           );
         if (!workspace.profile) throw new Error("Inicie sesión nuevamente.");
-        await reviseReception(
-          editingReception.id,
-          values,
-          editingReceptionRevision!,
-        );
-        await reload(true, {
-          userId: workspace.profile.user_id,
-          organizationId: workspace.organizationId,
+        await runCloudAction(async (fresh) => {
+          const current = fresh.data.receptions.find(
+            (row) =>
+              row.id === editingReception.id &&
+              row.organization_id === fresh.organizationId,
+          );
+          if (!current) throw new Error("La recepción ya no está disponible.");
+          let correction = values;
+          if (values.action === "edit") {
+            const initialWeights = data.reception_weights.filter(
+              (row) =>
+                row.reception_id === editingReception.id &&
+                row.status !== "Cancelado",
+            );
+            const currentWeights = fresh.data.reception_weights.filter(
+              (row) =>
+                row.reception_id === current.id && row.status !== "Cancelado",
+            );
+            const byTotal =
+              values.weights.length === 1 &&
+              values.weights[0].notes === "Corrección del total de recepción" &&
+              !initialWeights.some((row) => row.id === values.weights[0].id);
+            if (
+              !byTotal &&
+              (currentWeights.some(
+                (row) => !initialWeights.some((old) => old.id === row.id),
+              ) ||
+                initialWeights.some(
+                  (row) =>
+                    !currentWeights.some(
+                      (freshWeight) => freshWeight.id === row.id,
+                    ),
+                ))
+            )
+              throw new Error(
+                "Los pesajes cambiaron. Abra nuevamente la recepción para revisar sus valores actuales.",
+              );
+            const initialSelection = data.classifications.find(
+              (row) =>
+                row.reception_id === editingReception.id &&
+                row.status !== "Cancelado",
+            );
+            const currentSelection = fresh.data.classifications.find(
+              (row) =>
+                row.reception_id === current.id && row.status !== "Cancelado",
+            );
+            if (
+              !currentSelection &&
+              values.classification &&
+              (values.classification.rejected_kg !==
+                initialSelection?.rejected_kg ||
+                values.classification.reason !== initialSelection?.reason)
+            )
+              throw new Error(
+                "La selección cambió. Revise las pérdidas antes de corregir.",
+              );
+            if (
+              values.classification &&
+              initialSelection &&
+              currentSelection &&
+              ((values.classification.rejected_kg !==
+                initialSelection.rejected_kg &&
+                currentSelection.rejected_kg !== initialSelection.rejected_kg &&
+                values.classification.rejected_kg !==
+                  currentSelection.rejected_kg) ||
+                (values.classification.reason !== initialSelection.reason &&
+                  currentSelection.reason !== initialSelection.reason &&
+                  values.classification.reason !== currentSelection.reason))
+            )
+              throw new Error(
+                "Las pérdidas cambiaron mientras corregía. Revise la selección actual.",
+              );
+            correction = {
+              ...values,
+              date:
+                values.date === editingReception.date
+                  ? current.date
+                  : values.date,
+              responsible:
+                values.responsible === editingReception.responsible
+                  ? current.responsible
+                  : values.responsible,
+              notes:
+                values.notes === editingReception.notes
+                  ? current.notes
+                  : values.notes,
+              classification: currentSelection
+                ? {
+                    id: currentSelection.id,
+                    rejected_kg:
+                      values.classification &&
+                      values.classification.rejected_kg !==
+                        initialSelection?.rejected_kg
+                        ? values.classification.rejected_kg
+                        : currentSelection.rejected_kg,
+                    reason:
+                      values.classification &&
+                      values.classification.reason !== initialSelection?.reason
+                        ? values.classification.reason
+                        : currentSelection.reason,
+                  }
+                : null,
+            };
+            correction.weights = byTotal
+              ? values.weights.map((row) => ({
+                  ...row,
+                  operator:
+                    correction.action === "edit"
+                      ? correction.responsible
+                      : row.operator,
+                }))
+              : values.weights.map((row) => {
+                  const previous = initialWeights.find(
+                    (weight) => weight.id === row.id,
+                  );
+                  const saved = currentWeights.find(
+                    (weight) => weight.id === row.id,
+                  );
+                  if (!previous || !saved) return row;
+                  if (
+                    row.kg !== previous.kg &&
+                    saved.kg !== previous.kg &&
+                    row.kg !== saved.kg
+                  )
+                    throw new Error(
+                      "El mismo pesaje fue corregido por otra persona. Revise su valor actual antes de guardar.",
+                    );
+                  return {
+                    ...row,
+                    kg: row.kg === previous.kg ? saved.kg : row.kg,
+                    operator:
+                      row.operator === previous.operator
+                        ? saved.operator
+                        : row.operator,
+                    notes:
+                      row.notes === previous.notes ? saved.notes : row.notes,
+                  };
+                });
+          } else {
+            const initialPallets = receptionManagementImpact(
+              data,
+              editingReception,
+            ).pallets;
+            const currentPallets = receptionManagementImpact(
+              fresh.data,
+              current,
+            ).pallets;
+            if (
+              currentPallets.some(
+                (pallet) =>
+                  !initialPallets.some((previous) => previous.id === pallet.id),
+              )
+            )
+              throw new Error(
+                "La recepción tiene pallets nuevos. Revise la lista antes de confirmar su cancelación.",
+              );
+          }
+          assertReceptionManagement(fresh.data, current, correction);
+          await reviseReception(current.id, correction, fresh.revision);
         });
       }
       close();
@@ -894,7 +1059,7 @@ function WorkspaceApp() {
   const openProducerTotalCorrection = () => {
     setError("");
     if (activeProducerReceptions.length === 1) {
-      openReceptionManagement(activeProducerReceptions[0].id, "edit");
+      openReceptionManagement(activeProducerReceptions[0].id, "edit", "total");
     } else if (activeProducerReceptions.length > 1) {
       setDialog("correct_producer_total");
     }
@@ -1135,7 +1300,7 @@ function WorkspaceApp() {
                     ? "Pendiente de sincronizar"
                     : workspace.needsRefresh
                       ? "Pendiente de confirmar"
-                      : "Sincronizado"}
+                      : "Guardado en su cuenta"}
               </span>
             </span>
             <button
@@ -1157,7 +1322,7 @@ function WorkspaceApp() {
             </span>
             {!workspace.localOnly && (
               <button onClick={() => void sync()} disabled={busy || !online}>
-                {busy ? "Sincronizando…" : "Sincronizar"}
+                {busy ? "Actualizando…" : "Actualizar datos"}
               </button>
             )}
             {workspace.localOnly && (
@@ -1166,6 +1331,12 @@ function WorkspaceApp() {
               </button>
             )}
           </div>
+          {localBackup && (
+            <p className="hint no-print" role="status">
+              Hay un respaldo anterior con registros sin enviar. Se conserva
+              completo y puede descargarlo en Configuración.
+            </p>
+          )}
           {error && (
             <div className="error" role="alert">
               {error}
@@ -2006,7 +2177,10 @@ function WorkspaceApp() {
               plot: "Nueva propiedad y parcela",
               reception: "Nueva recepción",
               correct_producer_total: "Corregir total recibido",
-              edit_reception: "Editar recepción y pesos",
+              edit_reception:
+                editingReceptionMode === "total"
+                  ? "Corregir total recibido"
+                  : "Editar recepción y pesos",
               cancel_reception: "Eliminar recepción",
               weight: "Registrar pesaje",
               classification: "Registrar pérdidas / selección",
@@ -2524,7 +2698,7 @@ function WorkspaceApp() {
                       className="record"
                       disabled={busy || receptionSaving}
                       onClick={() =>
-                        openReceptionManagement(reception.id, "edit")
+                        openReceptionManagement(reception.id, "edit", "total")
                       }
                       aria-label={
                         "Corregir entrega del " +
@@ -2567,11 +2741,14 @@ function WorkspaceApp() {
                   ":" +
                   editingReceptionRevision +
                   ":" +
+                  editingReceptionMode +
+                  ":" +
                   dialog
                 }
                 data={data}
                 reception={editingReception}
                 action={dialog === "cancel_reception" ? "cancel" : "edit"}
+                initialWeightMode={editingReceptionMode}
                 busy={busy || receptionSaving}
                 activated={receptionManagementEnabled}
                 blockedReason={receptionManagementBlocked}
@@ -2910,33 +3087,61 @@ function WorkspaceApp() {
                         throw new Error(
                           "Active la actualización SQL de etiquetas en Supabase.",
                         );
-                      if (workspace.pending || workspace.needsRefresh)
-                        throw new Error(
-                          "Sincronice primero para conservar los registros pendientes.",
+                      await runCloudAction(async (fresh) => {
+                        if (!can(fresh.profile?.role ?? "auditor", "pallet"))
+                          throw new Error(
+                            "Su perfil no tiene permiso para editar etiquetas.",
+                          );
+                        if (!fresh.features?.label_export_data)
+                          throw new Error(
+                            "Active la actualización SQL de etiquetas en Supabase.",
+                          );
+                        const pallet = fresh.data.pallets.find(
+                          (p) =>
+                            p.id === current.id &&
+                            p.organization_id === fresh.organizationId,
                         );
-                      if (canEditDestination) {
-                        await updatePalletLabelDetails(
-                          current.id,
-                          fields,
-                          destination,
-                          reason,
-                          workspace.revision,
+                        if (
+                          !pallet ||
+                          ["Expedido", "Cancelado"].includes(pallet.status)
+                        )
+                          throw new Error("El pallet está cerrado.");
+                        if (
+                          fresh.data.shipment_pallets.some(
+                            (link) => link.pallet_id === pallet.id,
+                          )
+                        )
+                          throw new Error(
+                            "El pallet está vinculado a una expedición. Revise la carga antes de corregir la etiqueta.",
+                          );
+                        const freshFields = exportLabelFromForm(
+                          form,
+                          pallet.metadata?.export_label,
                         );
-                      } else {
-                        await updatePalletExportLabel(
-                          current.id,
-                          fields,
-                          reason,
-                          workspace.revision,
-                        );
-                      }
-                      if (!workspace.profile)
-                        throw new Error(
-                          "Su sesión cambió. Abra nuevamente el pallet.",
-                        );
-                      await reload(true, {
-                        userId: workspace.profile.user_id,
-                        organizationId: workspace.organizationId,
+                        const freshDestination =
+                          fresh.features?.label_destination_edit &&
+                          new FormData(form).has("label_destination")
+                            ? text(form, "label_destination")
+                            : pallet.destination;
+                        if (!freshDestination)
+                          throw new Error("Indique el destino del pallet.");
+                        assertExportDestination(freshFields, freshDestination);
+                        if (fresh.features?.label_destination_edit) {
+                          await updatePalletLabelDetails(
+                            pallet.id,
+                            freshFields,
+                            freshDestination,
+                            reason,
+                            fresh.revision,
+                          );
+                        } else {
+                          await updatePalletExportLabel(
+                            pallet.id,
+                            freshFields,
+                            reason,
+                            fresh.revision,
+                          );
+                        }
                       });
                     }
                     setDialog(null);
@@ -3001,19 +3206,16 @@ function WorkspaceApp() {
                   busy ||
                   labelSaving ||
                   !exportFieldsEnabled ||
-                  (!workspace.localOnly &&
-                    (!online || workspace.pending || workspace.needsRefresh))
+                  (!workspace.localOnly && !online)
                 }
               >
                 {labelSaving ? "Guardando…" : "Guardar y ver etiqueta"}
               </Submit>
-              {!workspace.localOnly &&
-                (!online || workspace.pending || workspace.needsRefresh) && (
-                  <p className="hint">
-                    Conéctese y sincronice los registros para guardar la
-                    etiqueta.
-                  </p>
-                )}
+              {!workspace.localOnly && !online && (
+                <p className="hint">
+                  Conéctese para guardar los datos de la etiqueta en su cuenta.
+                </p>
+              )}
               <button
                 type="button"
                 className="button secondary full"
@@ -3112,7 +3314,7 @@ function WorkspaceApp() {
                   },
                   workspace.localOnly
                     ? "Expedición guardada en este dispositivo."
-                    : "Expedición guardada localmente. Compruebe la sincronización antes de liberar la carga.",
+                    : "Expedición guardada en su cuenta.",
                 );
               }}
             >
@@ -3206,6 +3408,27 @@ function WorkspaceApp() {
                 Sin una cuenta, los datos se guardan solo en este dispositivo.
                 Con Supabase se utiliza el perfil asignado en el servidor.
               </p>
+              {localBackup && can(role, "correct") && (
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    const url = URL.createObjectURL(
+                      new Blob([JSON.stringify(localBackup, null, 2)], {
+                        type: "application/json",
+                      }),
+                    );
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download =
+                      "agronorte-respaldo-anterior-" + day() + ".json";
+                    link.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  }}
+                >
+                  <ArrowDownToLine size={16} /> Descargar respaldo anterior sin
+                  enviar
+                </button>
+              )}
               {can(role, "correct") && (
                 <details>
                   <summary>Ver respaldo JSON</summary>
@@ -3224,7 +3447,7 @@ function WorkspaceApp() {
                   <p>
                     {workspace.localOnly
                       ? "Datos guardados localmente en IndexedDB."
-                      : "Los cambios locales requieren sincronización."}
+                      : "Al confirmar, los cambios se guardan en su cuenta y están disponibles en otros equipos. Para guardar se necesita internet."}
                   </p>
                 </div>
               </div>
@@ -3313,14 +3536,6 @@ function WorkspaceApp() {
               Boolean(workspace.pending || workspace.needsRefresh)
             }
             busy={busy}
-            online={online}
-            syncError={error}
-            onSync={sync}
-            onUseServerData={
-              !workspace.localOnly && workspace.profile
-                ? updateDataForPrinting
-                : undefined
-            }
             editActivationPending={!exportFieldsEnabled}
             onEditExport={
               can(role, "pallet") &&
@@ -3340,33 +3555,9 @@ function WorkspaceApp() {
                 throw new Error(
                   "No se puede imprimir una etiqueta de un pallet cancelado.",
                 );
-              if (
-                !workspace.localOnly &&
-                (workspace.pending || workspace.needsRefresh)
-              )
-                throw new Error(
-                  "Sincronice antes de imprimir los códigos definitivos de lote y pallet.",
-                );
-              await commit((d) => {
-                const p = d.pallets.find((p) => p.id === currentLabel.id);
-                if (!p)
-                  throw new Error(
-                    "Abra nuevamente el pallet antes de imprimir.",
-                  );
-                if (p.status === "Cancelado")
-                  throw new Error("El pallet está cancelado.");
-                const before = structuredClone(p);
-                if (p.status === "En armado") p.status = "Etiquetado";
-                p.updated_at = now();
-                record(
-                  d,
-                  "pallets",
-                  p.id,
-                  "Solicitud de impresión de etiqueta",
-                  before,
-                  p,
-                );
-              });
+              if (!data.pallets.some((p) => p.id === currentLabel.id))
+                throw new Error("Abra nuevamente el pallet antes de imprimir.");
+              await recordPalletPrint(currentLabel.id);
             }}
           />
         </Modal>

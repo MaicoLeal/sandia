@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Data, Workspace, Profile } from "./types";
-import { LOCAL_ORG, LOCAL_KEY, emptyData } from "./domain";
+import { LOCAL_ORG, LOCAL_KEY, emptyData, can, base, now } from "./domain";
 import {
   readWorkspace,
   removeLegacyDemo,
@@ -17,6 +17,10 @@ import {
 import { getErrorMessage } from "./services/error-message";
 import { assertPrintRecovery } from "./services/workspace-reconciliation";
 import { reconcileNewReceipts } from "./services/workspace-new-receipts-reconciliation";
+import {
+  queuePalletPrint,
+  flushPalletPrints,
+} from "./services/pallet-print-audit";
 
 function isRevisionConflict(error: unknown) {
   if (typeof error !== "object" || error === null) return false;
@@ -38,6 +42,7 @@ export function useWorkspace() {
   );
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
+  const [localBackup, setLocalBackup] = useState<Workspace | null>(null);
   const lock = useRef(false);
   const epoch = useRef(0);
   const identity = useRef<string | null | undefined>(undefined);
@@ -74,7 +79,15 @@ export function useWorkspace() {
         identity.current = session?.data.session?.user.id ?? null;
         if (session?.data.session) {
           setNeedsLogin(false);
-          const key = "cloud:" + session.data.session.user.id;
+          // Account saves use a separate cache. Never replace or resend the
+          // previous device workspace: its unsent records remain accessible
+          // as a backup, including their files and reception drafts.
+          const previousDevice = await readWorkspace(
+            "cloud:" + session.data.session.user.id,
+          );
+          if (!current()) return;
+          setLocalBackup(null);
+          const key = "account:" + session.data.session.user.id;
           let cached = await readWorkspace(key);
           if (!current()) return;
           if (requireRemote) {
@@ -111,6 +124,11 @@ export function useWorkspace() {
               return;
             }
             currentProfile = profile;
+            if (
+              previousDevice?.pending &&
+              previousDevice.organizationId === profile.organization_id
+            )
+              setLocalBackup(previousDevice);
             if (cached && cached.organizationId !== profile.organization_id)
               throw new Error(
                 "La organización de la cuenta cambió. Contacte al administrador antes de sincronizar los registros pendientes.",
@@ -151,6 +169,10 @@ export function useWorkspace() {
               await replaceWorkspaceIfUnchanged(key, verifiedCache, remote);
               if (!current()) return;
               setWorkspace(remote);
+              void flushPalletPrints(
+                remote.organizationId,
+                session.data.session.user.id,
+              );
             }
             return;
           }
@@ -171,6 +193,10 @@ export function useWorkspace() {
           await replaceWorkspaceIfUnchanged(key, undefined, remote);
           if (!current()) return;
           setWorkspace(remote);
+          void flushPalletPrints(
+            remote.organizationId,
+            session.data.session.user.id,
+          );
         } else {
           setRecipientProfile(null);
           if (import.meta.env.VITE_REQUIRE_AUTH === "true") {
@@ -261,9 +287,111 @@ export function useWorkspace() {
       window.removeEventListener("offline", off);
     };
   }, [load]);
+  const runCloudAction = async (
+    action: (fresh: Workspace) => Promise<Workspace | void>,
+  ): Promise<void> => {
+    if (!workspace || workspace.localOnly || lock.current)
+      throw new Error("Espere a que termine la operación actual.");
+    if (!online)
+      throw new Error("Conéctese a internet para guardar con su cuenta.");
+    const userId = workspace.profile?.user_id;
+    const org = workspace.organizationId;
+    if (!userId) throw new WorkspaceAccessError("Inicie sesión.");
+    lock.current = true;
+    const request = epoch.current;
+    const assertScope = (fresh: Workspace) => {
+      if (
+        request !== epoch.current ||
+        fresh.organizationId !== org ||
+        fresh.profile?.user_id !== userId ||
+        fresh.profile.organization_id !== org ||
+        fresh.profile.status !== "Activo" ||
+        fresh.profile.role === "destinatario"
+      )
+        throw new WorkspaceAccessError(
+          "Su sesión o acceso cambió. Vuelva a entrar.",
+        );
+    };
+    const key = "account:" + userId;
+    setBusy(true);
+    setError("");
+    let saved = false;
+    let displayed: Workspace | undefined;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const fresh = await loadRemote();
+        assertScope(fresh);
+        const cached = await readWorkspace(key);
+        if (cached?.pending)
+          throw new Error(
+            "Hay registros pendientes en el respaldo de esta cuenta. Se conservan; actualice antes de guardar.",
+          );
+        await replaceWorkspaceIfUnchanged(key, cached, fresh);
+        assertScope(fresh);
+        const activeProfile = await loadProfile();
+        assertScope({ ...fresh, profile: activeProfile });
+        setWorkspace(fresh);
+        displayed = fresh;
+        let acknowledged: Workspace | void;
+        try {
+          acknowledged = await action(fresh);
+        } catch (problem) {
+          const code =
+            typeof problem === "object" && problem !== null
+              ? (problem as { code?: string }).code
+              : undefined;
+          const message = getErrorMessage(problem, "");
+          if (
+            code === "P0001" &&
+            message.startsWith("Conflicto de sincronización:")
+          ) {
+            if (attempt === 0) continue; // The rejected transaction made no changes.
+            throw new Error(
+              "Otra operación terminó al mismo tiempo. Sus valores siguen en el formulario; vuelva a pulsar Guardar.",
+            );
+          }
+          throw problem;
+        }
+        saved = true;
+        assertScope(fresh);
+        displayed = acknowledged ?? { ...fresh, needsRefresh: true };
+        assertScope(displayed);
+        await replaceWorkspaceIfUnchanged(key, fresh, displayed);
+        setWorkspace(displayed);
+        const confirmed = await loadRemote();
+        assertScope(confirmed);
+        await replaceWorkspaceIfUnchanged(key, displayed, confirmed);
+        setWorkspace(confirmed);
+        return;
+      }
+    } catch (problem) {
+      if (problem instanceof WorkspaceAccessError || request !== epoch.current)
+        throw problem;
+      if (!saved) throw problem;
+      // The write was confirmed. A later read/network failure must never
+      // invite another submission of the same reception.
+      if (displayed)
+        setWorkspace({ ...displayed, pending: false, needsRefresh: true });
+      setError(
+        "Los cambios ya están guardados en su cuenta. Actualice la vista cuando vuelva la conexión.",
+      );
+    } finally {
+      lock.current = false;
+      if (request === epoch.current) setBusy(false);
+    }
+  };
   const commit = async (update: (data: Data) => void) => {
     if (!workspace || lock.current)
       throw new Error("Espere a que termine la operación actual.");
+    if (!workspace.localOnly) {
+      await runCloudAction(async (fresh) => {
+        const copy = structuredClone(fresh);
+        update(copy.data);
+        const revision = await syncRemote(copy);
+        return { ...copy, revision, pending: false, needsRefresh: true };
+      });
+      return;
+    }
     if (workspace.needsRefresh)
       throw new Error(
         "Actualice los datos con Sincronizar antes de continuar.",
@@ -275,7 +403,9 @@ export function useWorkspace() {
       const copy = structuredClone(workspace);
       update(copy.data);
       copy.pending = !copy.localOnly;
-      const key = copy.localOnly ? LOCAL_KEY : "cloud:" + copy.profile?.user_id;
+      const key = copy.localOnly
+        ? LOCAL_KEY
+        : "account:" + copy.profile?.user_id;
       await replaceWorkspaceIfUnchanged(key, workspace, copy);
       if (request === epoch.current) setWorkspace(copy);
     } finally {
@@ -322,7 +452,7 @@ export function useWorkspace() {
           if (!current()) return;
           sendWorkspace = reconcileNewReceipts(currentWorkspace, remote);
           await archiveWorkspaceAndReplace(
-            "cloud:" + workspace.profile?.user_id,
+            "account:" + workspace.profile?.user_id,
             currentWorkspace,
             sendWorkspace,
           );
@@ -339,7 +469,7 @@ export function useWorkspace() {
           needsRefresh: true,
         };
         await replaceWorkspaceIfUnchanged(
-          "cloud:" + workspace.profile?.user_id,
+          "account:" + workspace.profile?.user_id,
           sendWorkspace,
           acknowledged,
         );
@@ -358,7 +488,7 @@ export function useWorkspace() {
           "Su acceso cambió. Actualice la sesión.",
         );
       await replaceWorkspaceIfUnchanged(
-        "cloud:" + remote.profile?.user_id,
+        "account:" + remote.profile?.user_id,
         expectedCache,
         remote,
       );
@@ -376,6 +506,20 @@ export function useWorkspace() {
       if (current()) setBusy(false);
     }
   }, [workspace, online]);
+  useEffect(() => {
+    if (!workspace || workspace.localOnly || !online) return;
+    const refresh = () => {
+      if (!lock.current && document.visibilityState === "visible") void sync();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = setInterval(refresh, 60000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      clearInterval(timer);
+    };
+  }, [workspace, online, sync]);
   useEffect(() => {
     if (
       !workspace ||
@@ -403,7 +547,7 @@ export function useWorkspace() {
       if (!current()) return false;
       assertPrintRecovery(workspace, remote);
       await archiveWorkspaceAndReplace(
-        "cloud:" + workspace.profile?.user_id,
+        "account:" + workspace.profile?.user_id,
         workspace,
         remote,
       );
@@ -424,6 +568,43 @@ export function useWorkspace() {
       if (current()) setBusy(false);
     }
   };
+  const recordPalletPrint = async (id: string): Promise<void> => {
+    if (!workspace) throw new WorkspaceAccessError("Inicie sesión.");
+    const role = workspace.localOnly
+      ? "administrador"
+      : (workspace.profile?.role ?? "auditor");
+    if (!can(role, "pallet"))
+      throw new WorkspaceAccessError(
+        "Su perfil no tiene permiso para imprimir.",
+      );
+    const pallet = workspace.data.pallets.find(
+      (p) => p.id === id && p.organization_id === workspace.organizationId,
+    );
+    if (!pallet || pallet.status === "Cancelado")
+      throw new Error("El pallet no está disponible para imprimir.");
+    if (!workspace.localOnly) {
+      // Durable audit queue only; printing never waits on Supabase or the
+      // organization revision and never sends a full device snapshot.
+      await queuePalletPrint(workspace, id).catch(() => undefined);
+      return;
+    }
+    await commit((data) => {
+      const current = data.pallets.find((p) => p.id === id)!;
+      const before = structuredClone(current);
+      if (current.status === "En armado") current.status = "Etiquetado";
+      current.updated_at = now();
+      data.audit_logs.push({
+        ...base(workspace.organizationId),
+        entity_type: "pallets",
+        entity_id: id,
+        action: "Solicitud de impresión de etiqueta",
+        actor: "Registro local",
+        before,
+        after: structuredClone(current),
+        reason: "",
+      });
+    }).catch(() => undefined);
+  };
   return {
     recipientProfile,
     needsLogin,
@@ -432,7 +613,10 @@ export function useWorkspace() {
     setError,
     busy,
     online,
+    localBackup,
     commit,
+    runCloudAction,
+    recordPalletPrint,
     sync,
     useServerData,
     reload: load,

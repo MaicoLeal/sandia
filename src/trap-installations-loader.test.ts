@@ -217,15 +217,34 @@ describe("carga de instalaciones de trampas y compatibilidad del servidor", () =
     ]);
   });
 
-  it("rechaza datos que cambiaron mientras se consultaban las instalaciones", async () => {
-    revisions = [7, 8];
+  it("repite la consulta completa y confirma una versión estable después de un cambio", async () => {
+    revisions = [7, 8, 8, 8];
     rows.trap_installations = [installation(1)];
-    await expect(service.loadRemote()).rejects.toThrow(
-      "Los datos cambiaron durante la consulta",
-    );
+    const result = await service.loadRemote();
+    expect(result.revision).toBe(8);
     expect(events[0]).toBe("revision:7");
     expect(events.at(-1)).toBe("revision:8");
     expect(events).toContain("rows:trap_installations:0");
+    expect(
+      events.filter((event) => event === "rows:trap_installations:0"),
+    ).toHaveLength(2);
+  });
+
+  it("limita los intentos cuando otros operadores siguen modificando los datos", async () => {
+    revisions = [7, 8, 8, 9, 9, 10];
+    await expect(service.loadRemote()).rejects.toThrow(
+      "Se están guardando nuevos datos",
+    );
+    expect(
+      events.filter((event) => event.startsWith("revision:")),
+    ).toHaveLength(6);
+  });
+
+  it("no acepta una revisión ausente como confirmación estable", async () => {
+    revisions = [];
+    await expect(service.loadRemote()).rejects.toThrow(
+      "No se pudo confirmar la versión",
+    );
   });
 
   it("bloquea destinatarios antes de consultar productores o instalaciones privadas", async () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Pencil, Plus, Trash2, XCircle } from "lucide-react";
 import { Field, NumericInput } from "./components";
 import { kg, lossReasons, origin, receptionTotal, round } from "./domain";
@@ -20,6 +20,7 @@ export function ReceptionManagement({
   onSubmit,
   onCancel,
   onRefresh,
+  initialWeightMode = "weights",
 }: {
   data: Data;
   reception: Reception;
@@ -30,6 +31,7 @@ export function ReceptionManagement({
   onSubmit: (values: ReceptionManagementValues) => Promise<void>;
   onCancel: () => void;
   onRefresh?: () => Promise<void>;
+  initialWeightMode?: "weights" | "total";
 }) {
   const impact = receptionManagementImpact(data, reception);
   const classification = impact.classifications[0];
@@ -45,11 +47,25 @@ export function ReceptionManagement({
   const [rejected, setRejected] = useState(
     String(classification?.rejected_kg ?? 0),
   );
-  const [weightMode, setWeightMode] = useState<"weights" | "total">("weights");
+  const [weightMode, setWeightMode] = useState<"weights" | "total">(
+    initialWeightMode,
+  );
   const [correctedTotal, setCorrectedTotal] = useState(
     String(receptionTotal(data, reception.id)),
   );
   const [totalWeightId] = useState(() => crypto.randomUUID());
+  const totalInputRef = useCallback(
+    (input: HTMLInputElement | null) => {
+      // React's mount focus can run before the dialog is open. The native
+      // autofocus attribute lets showModal select this input when it opens.
+      if (input && initialWeightMode === "total") {
+        input.autofocus = true;
+        const dialog = input.closest<HTMLDialogElement>("dialog");
+        if (!dialog || dialog.open) input.focus();
+      }
+    },
+    [initialWeightMode],
+  );
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const actualBlocked =
@@ -205,26 +221,10 @@ export function ReceptionManagement({
             Registre el peso de las sandías: ya es neto, sin el embalaje de 42
             kg. No se descuenta la tara nuevamente.
           </p>
-          <div className="form-grid">
-            <Field label="Fecha de recepción *">
-              <input
-                type="date"
-                name="date"
-                required
-                defaultValue={reception.date}
-              />
-            </Field>
-            <Field label="Responsable *">
-              <input
-                name="responsible"
-                required
-                maxLength={200}
-                defaultValue={reception.responsible}
-              />
-            </Field>
-          </div>
           <h3>Corregir peso recibido</h3>
-          {(impact.activeWeights.length > 1 || weights.length > 1) && (
+          {(impact.activeWeights.length > 1 ||
+            weights.length > 1 ||
+            weightMode === "total") && (
             <div className="row" style={{ marginBottom: 12 }}>
               <button
                 type="button"
@@ -250,7 +250,10 @@ export function ReceptionManagement({
             <>
               <Field label="Total recibido (kg) *">
                 <NumericInput
+                  ref={totalInputRef}
+                  name="received_total"
                   required
+                  autoFocus={initialWeightMode === "total"}
                   value={correctedTotal}
                   maxLength={15}
                   disabled={disabled}
@@ -363,6 +366,24 @@ export function ReceptionManagement({
               </strong>
             </div>
           </div>
+          <div className="form-grid">
+            <Field label="Fecha de recepción *">
+              <input
+                type="date"
+                name="date"
+                required
+                defaultValue={reception.date}
+              />
+            </Field>
+            <Field label="Responsable *">
+              <input
+                name="responsible"
+                required
+                maxLength={200}
+                defaultValue={reception.responsible}
+              />
+            </Field>
+          </div>
           {classification && (
             <>
               <h3>Pérdidas de esta recepción</h3>
@@ -440,7 +461,9 @@ export function ReceptionManagement({
           ? "Guardando…"
           : action === "cancel"
             ? "Cancelar recepción con historial"
-            : "Guardar recepción corregida"}
+            : weightMode === "total"
+              ? "Guardar total recibido"
+              : "Guardar recepción corregida"}
       </button>
       <button
         className="button full"

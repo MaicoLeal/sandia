@@ -205,6 +205,7 @@ export interface Workspace {
     reception_management?: boolean;
     pallet_tare?: boolean;
     trap_installations?: boolean;
+    label_print_audit?: boolean;
   };
   needsRefresh?: boolean;
   data: Data;

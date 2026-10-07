@@ -43,7 +43,7 @@ export async function loadProfile(): Promise<Profile> {
     );
   return profile;
 }
-export async function loadRemote(): Promise<Workspace> {
+export async function loadRemote(attempt = 0): Promise<Workspace> {
   const profile = await loadProfile();
   if (profile.role === "destinatario")
     throw new WorkspaceAccessError(
@@ -57,6 +57,13 @@ export async function loadRemote(): Promise<Workspace> {
     .eq("id", profile.organization_id)
     .single();
   if (error) throw error;
+  if (
+    !Number.isSafeInteger(organization?.revision) ||
+    organization.revision < 0
+  )
+    throw new Error(
+      "No se pudo confirmar la versión de los datos de su cuenta.",
+    );
   const tables = [
     "producers",
     "farms",
@@ -103,10 +110,16 @@ export async function loadRemote(): Promise<Workspace> {
     .eq("id", profile.organization_id)
     .single();
   if (latest.error) throw latest.error;
-  if (latest.data.revision !== organization.revision)
+  if (!Number.isSafeInteger(latest.data?.revision) || latest.data.revision < 0)
     throw new Error(
-      "Los datos cambiaron durante la consulta. Sincronice nuevamente.",
+      "No se pudo confirmar la versión de los datos de su cuenta.",
     );
+  if (latest.data.revision !== organization.revision) {
+    if (attempt < 2) return loadRemote(attempt + 1);
+    throw new Error(
+      "Se están guardando nuevos datos. Actualice la vista en unos segundos.",
+    );
+  }
   return {
     features: capabilities.error ? {} : capabilities.data,
     data: Object.fromEntries(results) as unknown as Data,
@@ -164,10 +177,13 @@ export async function updatePalletExportLabel(
     expected_revision: revision,
   });
   if (error)
-    throw new Error(
-      error.code === "PGRST202"
-        ? "Aplique la actualización SQL de etiquetas de exportación en Supabase."
-        : error.message,
+    throw Object.assign(
+      new Error(
+        error.code === "PGRST202"
+          ? "Aplique la actualización SQL de etiquetas de exportación en Supabase."
+          : error.message,
+      ),
+      { code: error.code },
     );
 }
 export async function updatePalletLabelDetails(
@@ -186,10 +202,13 @@ export async function updatePalletLabelDetails(
     expected_revision: revision,
   });
   if (error)
-    throw new Error(
-      error.code === "PGRST202"
-        ? "Aplique la actualización SQL de edición de etiquetas en Supabase y sincronice nuevamente."
-        : error.message,
+    throw Object.assign(
+      new Error(
+        error.code === "PGRST202"
+          ? "Aplique la actualización SQL de edición de etiquetas en Supabase y sincronice nuevamente."
+          : error.message,
+      ),
+      { code: error.code },
     );
 }
 export async function revisePallet(
@@ -253,10 +272,13 @@ export async function reviseReception(
           },
         });
   if (error)
-    throw new Error(
-      ["PGRST202", "42883"].includes(error.code)
-        ? "El administrador debe activar la actualización de gestión de recepciones en Supabase y sincronizar nuevamente."
-        : error.message,
+    throw Object.assign(
+      new Error(
+        ["PGRST202", "42883"].includes(error.code)
+          ? "El administrador debe activar la actualización de gestión de recepciones en Supabase y sincronizar nuevamente."
+          : error.message,
+      ),
+      { code: error.code },
     );
 }
 export async function syncRemote(workspace: Workspace) {
