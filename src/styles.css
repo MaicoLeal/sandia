@@ -967,6 +967,8 @@ footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  overflow-wrap: anywhere;
   background: #fff0eb;
   border: 1px solid #ebc9bc;
   border-radius: 8px;
@@ -975,6 +977,9 @@ footer {
   line-height: 1.5;
   color: #a4482b;
   margin: 12px 0;
+}
+.error .icon-button {
+  flex-shrink: 0;
 }
 .toast {
   display: flex;

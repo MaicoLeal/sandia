@@ -81,6 +81,7 @@ import {
 import { assertPalletCorrection } from "./pallet-corrections";
 import type { PalletCorrectionValues } from "./pallet-corrections";
 import { useWorkspace } from "./useWorkspace";
+import { getErrorMessage } from "./services/error-message";
 import { RecipientPortal } from "./RecipientPortal";
 import { RecipientAccess } from "./RecipientAccess";
 import {
@@ -135,7 +136,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-5 · Fecha de envasado";
+const appVersion = "2026.10.07-6 · Mensajes de sincronización";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -615,7 +616,7 @@ function WorkspaceApp() {
       close();
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo guardar.");
+      setError(getErrorMessage(e, "No se pudo guardar."));
       return false;
     }
   };
@@ -754,11 +755,7 @@ function WorkspaceApp() {
           : "Recepción corregida. Los kg recibidos, las pérdidas y el saldo se recalcularon con historial.",
       );
     } catch (problem) {
-      setError(
-        problem instanceof Error
-          ? problem.message
-          : "No se pudo guardar la recepción.",
-      );
+      setError(getErrorMessage(problem, "No se pudo guardar la recepción."));
     } finally {
       receptionSaveLock.current = false;
       setReceptionSaving(false);
@@ -860,11 +857,7 @@ function WorkspaceApp() {
           : "Pallet corregido con historial. Revise los datos y vuelva a imprimir la etiqueta si cambiaron.",
       );
     } catch (problem) {
-      setError(
-        problem instanceof Error
-          ? problem.message
-          : "No se pudo corregir el pallet.",
-      );
+      setError(getErrorMessage(problem, "No se pudo corregir el pallet."));
     } finally {
       palletSaveLock.current = false;
       setPalletSaving(false);
@@ -2847,11 +2840,7 @@ function WorkspaceApp() {
                       "Etiqueta guardada con historial. Revise la vista previa antes de imprimir.",
                     );
                   } catch (problem) {
-                    setError(
-                      problem instanceof Error
-                        ? problem.message
-                        : "No se pudo guardar.",
-                    );
+                    setError(getErrorMessage(problem, "No se pudo guardar."));
                   } finally {
                     setLabelSaving(false);
                   }

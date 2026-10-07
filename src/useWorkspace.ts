@@ -13,6 +13,7 @@ import {
   syncRemote,
   WorkspaceAccessError,
 } from "./services/supabase";
+import { getErrorMessage } from "./services/error-message";
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -183,15 +184,13 @@ export function useWorkspace() {
         }
         setWorkspace(null);
         setRecipientProfile(null);
-        setError(
-          e instanceof Error
-            ? e.message
-            : "No se pudo abrir el almacenamiento local.",
-        );
+        setError(getErrorMessage(e, "No se pudieron cargar los datos."));
         if (requireRemote) {
           if (e instanceof WorkspaceAccessError) throw e;
+          const detail = getErrorMessage(e, "");
           throw new Error(
-            "No se pudo confirmar la etiqueta guardada. Conéctese y sincronice antes de imprimir.",
+            "No se pudo confirmar la etiqueta guardada. Conéctese y sincronice antes de imprimir." +
+              (detail ? ` ${detail}` : ""),
           );
         }
       }
@@ -322,7 +321,7 @@ export function useWorkspace() {
         setWorkspace(null);
         setRecipientProfile(null);
       }
-      setError(e instanceof Error ? e.message : "Error de sincronización.");
+      setError(getErrorMessage(e, "Error de sincronización."));
     } finally {
       lock.current = false;
       if (current()) setBusy(false);
