@@ -52,9 +52,7 @@ export function TrapInstallationsPanel({
             <Leaf size={18} aria-hidden="true" />
             Instalaciones de trampas
           </h3>
-          <p>
-            Referencias de instalaciones; no indican capturas ni diagnósticos.
-          </p>
+          <p>Códigos del productor SPE/CAN y datos de las instalaciones.</p>
         </div>
         <span className="trap-installations-count">
           {records.length} {records.length === 1 ? "registro" : "registros"}
@@ -83,6 +81,11 @@ export function TrapInstallationsPanel({
               <details className="trap-installation" key={record.id}>
                 <summary>
                   <span className="trap-installation-summary-text">
+                    <span>
+                      {record.producer_id
+                        ? "Código del productor"
+                        : "Código en la planilla"}
+                    </span>
                     <strong>{show(record.trap_code)}</strong>
                     <span>Instalación: {installedLabel}</span>
                     <span>{show(record.community)}</span>

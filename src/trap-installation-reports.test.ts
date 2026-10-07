@@ -45,6 +45,8 @@ describe("informes de instalaciones de trampas", () => {
   it("conserva la fecha de instalación, referencias y coordenadas originales sin incluir datos personales del productor", () => {
     const rows = trapInstallationRows([installation], [producer]);
     expect(rows[0]).toMatchObject({
+      Código_productor: "SPE-TEST-001-SAN",
+      Código_en_planilla: "SPE-TEST-001-SAN",
       Productor: producer.name,
       Nombre_en_planilla: "NOMBRE ORIGINAL",
       Fecha_instalación: "12/08/2026",
@@ -66,9 +68,11 @@ describe("informes de instalaciones de trampas", () => {
       installed_on: "2026-08-25",
       trap_code: "SPE-TEST-001-MEL",
     };
-    expect(trapInstallationRows([additional], [producer])[0].Productor).toBe(
-      "Sin productor vinculado",
-    );
+    expect(trapInstallationRows([additional], [producer])[0]).toMatchObject({
+      Código_productor: "",
+      Código_en_planilla: "SPE-TEST-001-MEL",
+      Productor: "Sin productor vinculado",
+    });
     expect(
       filterTrapInstallations([installation, additional], [producer], {
         query: "sin productor",

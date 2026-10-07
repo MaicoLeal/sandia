@@ -9,7 +9,8 @@ export function trapInstallationRows(
     producers.map((producer) => [producer.id, producer.name]),
   );
   return records.map((record) => ({
-    Código_trampa: record.trap_code,
+    Código_productor: record.producer_id ? record.trap_code : "",
+    Código_en_planilla: record.trap_code,
     Productor: record.producer_id
       ? (names.get(record.producer_id) ??
         record.source_producer_name ??

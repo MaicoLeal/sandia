@@ -135,7 +135,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-3 · Importador en etiqueta";
+const appVersion = "2026.10.07-4 · Código del productor SPE/CAN";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1494,7 +1494,7 @@ function WorkspaceApp() {
                       </div>
                       <h2>{p.name}</h2>
                       <p className="hint">
-                        Código Agronorte:{" "}
+                        Código interno Agronorte:{" "}
                         <strong>
                           {p.metadata?.internal_code?.trim() ||
                             "Pendiente de asignar"}
@@ -1503,7 +1503,7 @@ function WorkspaceApp() {
                       <p>{p.community || "Localidad no registrada"}</p>
                       {!!p.metadata?.trap_reference_codes?.length && (
                         <p className="hint">
-                          Referencia SPE/CAN:{" "}
+                          Código del productor:{" "}
                           <strong>
                             {p.metadata.trap_reference_codes.join(" / ")}
                           </strong>
@@ -2104,11 +2104,11 @@ function WorkspaceApp() {
                 />
               </Field>
               <p className="hint">
-                Se asigna automáticamente al sincronizar y permanece vinculado
-                al productor para sus etiquetas.
+                Identificación interna de Agronorte. Se asigna automáticamente
+                al sincronizar y permanece vinculada al productor.
               </p>
               {!!editingProducer?.metadata?.trap_reference_codes?.length && (
-                <Field label="Referencia SPE/CAN · planilla de trampas">
+                <Field label="Código del productor (SPE/CAN)">
                   <input
                     readOnly
                     value={editingProducer.metadata.trap_reference_codes.join(
@@ -2173,7 +2173,7 @@ function WorkspaceApp() {
                     en Supabase.
                   </p>
                 )}
-                <Field label="Código oficial del productor para exportación">
+                <Field label="Código de exportación (si corresponde)">
                   <input
                     name="export_code"
                     maxLength={100}
@@ -3505,7 +3505,7 @@ function WorkspaceApp() {
           <Badge>{producer.status}</Badge>
           <h2>{producer.name}</h2>
           <p className="hint">
-            Código Agronorte:{" "}
+            Código interno Agronorte:{" "}
             <strong>
               {producer.metadata?.internal_code?.trim() ||
                 "Pendiente de asignar"}
@@ -3513,7 +3513,7 @@ function WorkspaceApp() {
           </p>
           {!!producer.metadata?.trap_reference_codes?.length && (
             <p className="hint">
-              Referencia SPE/CAN:{" "}
+              Código del productor:{" "}
               <strong>
                 {producer.metadata.trap_reference_codes.join(" / ")}
               </strong>
@@ -4475,9 +4475,9 @@ function ExportLabelFields({
         />
       </Field>
       <p className="hint">
-        Si deja el código vacío, se usa la referencia SPE/CAN de la planilla de
-        trampas, o el código de exportación del productor cuando no haya
-        referencia. El origen se toma del productor si está registrado.
+        El código del productor es el SPE/CAN registrado en su ficha. Si deja
+        este campo vacío, se usa ese código; cuando no esté registrado, se usa
+        el código de exportación disponible. El origen se toma del productor.
       </p>
       <label className="check-row">
         <input
@@ -4785,7 +4785,7 @@ function Reports({
                   "Informe de " + kind,
                   kind === "Instalación de trampas"
                     ? [
-                        "Referencia",
+                        "Código del productor / planilla",
                         "Productor",
                         "Instalación",
                         "Localidad",
@@ -4796,7 +4796,8 @@ function Reports({
                     : headers,
                   kind === "Instalación de trampas"
                     ? report.map((r) => [
-                        r.Código_trampa,
+                        r.Código_productor ||
+                          `${r.Código_en_planilla} (sin productor vinculado)`,
                         r.Productor,
                         r.Fecha_instalación,
                         r.Comunidad,

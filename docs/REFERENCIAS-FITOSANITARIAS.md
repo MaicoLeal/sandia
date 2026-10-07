@@ -1,4 +1,4 @@
-# Referências SPE/CAN e modelo de etiqueta para Uruguay
+# Códigos de produtor SPE/CAN e modelo de etiqueta para Uruguay
 
 Versão 2026.10.07-2. A planilha enviada pelo proprietário é o formulário SENAVE **FOR-DVF-013 — Planilla de instalación de trampas**, emissor **DPV-DVF**, versão **01**, vigência **13/08/2025**, dependência **Oficina Regional San Pedro**. O programa informado é vigilância fitossanitária de moscas das frutas e o plano de exportação de cucurbitáceas para Uruguay. O responsável registrado é **Ing. Amancio Coronel**.
 
@@ -6,8 +6,8 @@ O documento contém 23 instalações, 22 linhas com nomes de produtores e 21 pro
 
 ## Uso no aplicativo
 
-- Em **Productores**, os cards e a pesquisa incluem a referência SPE/CAN. Ao abrir o histórico, a seção **Instalaciones de trampas** apresenta cada instalação em um card expansível apropriado para celular.
-- Em **Informes → Instalación de trampas**, pode-se filtrar por produtor, data de instalação, código, nome ou localidade, consultar todos os registros e exportar CSV/Excel ou imprimir um resumo A4 paisagem. O CSV conserva todos os campos originais e notas de revisão.
+- Em **Productores**, os cards, o histórico e a edição apresentam o SPE/CAN como **Código del productor**, conforme confirmado pelo proprietário na versão **2026.10.07-4**. A pesquisa aceita esse código. A seção **Instalaciones de trampas** conserva os dados de cada instalação em um card expansível apropriado para celular.
+- Em **Informes → Instalación de trampas**, pode-se filtrar por produtor, data de instalação, código, nome ou localidade, consultar todos os registros e exportar CSV/Excel ou imprimir um resumo A4 paisagem. O CSV identifica o código vinculado em **Código_productor** e conserva o valor original em **Código_en_planilla**, inclusive nas linhas sem produtor. Os campos originais e notas de revisão são preservados.
 - A área é apresentada por instalação. As duas áreas de Richard não são somadas como se comprovassem duas propriedades diferentes.
 - O registro **TRAMPA ADCIONAL**, com hospedante MELON, fica sem produtor e continua consultável em Informes, pesquisando “Sin productor”. Ele não cria um produtor fictício nem fornece código à etiqueta de Sandía.
 
@@ -17,17 +17,17 @@ Na linha de Raquel, os valores **SPE-GUA-01-SAN** e **730323,86** são mantidos 
 
 ## Etiqueta A4 paisagem
 
-A etiqueta e seu PDF usam os mesmos campos: *Citrullus lanatus* (sandía), origem, código/referência do produtor, peso líquido, data real de colheita, data confirmada de embalagem, AFIDI e rastreabilidade por QR/lote/pallet. O modelo mantém a identidade visual da Agronorte.
+A etiqueta e seu PDF usam os mesmos campos: _Citrullus lanatus_ (sandía), origem, código do produtor SPE/CAN, peso líquido, data real de colheita, data confirmada de embalagem, AFIDI e rastreabilidade por QR/lote/pallet. O modelo mantém a identidade visual da Agronorte.
 
 Conforme a identificação escolhida pelo proprietário, **CÓDIGO DEL PRODUCTOR** segue esta ordem:
 
 1. Valor específico preenchido em **Editar etiqueta**.
-2. Referências SPE/CAN das instalações ativas de Sandía vinculadas ao produtor.
-3. Código oficial/de exportação anteriormente registrado, quando não houver referência.
+2. Código(s) do produtor SPE/CAN das instalações ativas de Sandía vinculadas ao cadastro.
+3. Código de exportação anteriormente registrado, quando não houver SPE/CAN.
 
-As referências não são apresentadas como número de registro oficial do produtor. AGN continua no cabeçalho como **Código interno Agronorte**, e `export_code` permanece armazenado. Richard imprime ambas as referências, pois a planilha não informa qual delas corresponde à origem de cada pallet.
+O proprietário confirmou que o código da coluna de armadilha é o **CÓDIGO DEL PRODUCTOR** a apresentar. AGN continua no cabeçalho como **Código interno Agronorte**, e `export_code` permanece armazenado. Richard imprime ambos os códigos SPE/CAN, pois a planilha não informa qual deles corresponde à origem de cada pallet. A correção de nomenclatura não altera a importação, os identificadores armazenados ou o conteúdo dos QR Codes e não exige um novo SQL.
 
-O modelo enviado em 07/10/2026 inclui o texto “FRUTA DE EXPORTACIÓN A URUGUAY - SENAVE - PROGRAMA DE CERTIFICACIÓN DE FRUTAS PROVENIENTES DEL SISTEMA INTEGRADO DE MEDIDAS DE MITIGACIÓN DE RIESGO PARA”, seguido de *Anastrepha grandis.* e **LOTE N°**. Esse texto integra a renderização HTML/PDF e pode ser conferido em **Editar etiqueta → Ver texto del modelo para Uruguay**. A atualização aplica o modelo aos pallets atuais para Uruguay com AFIDI **1571652**, sem vínculo com expedição, criados até **07/10/2026 13:07:38 UTC**, e registra a seleção do texto em `export_label.senave_program`. Pallets futuros recebem seus dados confirmados no formulário, sem AFIDI ou declaração automaticamente atribuídos pela importação.
+O modelo enviado em 07/10/2026 inclui o texto “FRUTA DE EXPORTACIÓN A URUGUAY - SENAVE - PROGRAMA DE CERTIFICACIÓN DE FRUTAS PROVENIENTES DEL SISTEMA INTEGRADO DE MEDIDAS DE MITIGACIÓN DE RIESGO PARA”, seguido de _Anastrepha grandis._ e **LOTE N°**. Esse texto integra a renderização HTML/PDF e pode ser conferido em **Editar etiqueta → Ver texto del modelo para Uruguay**. A atualização aplica o modelo aos pallets atuais para Uruguay com AFIDI **1571652**, sem vínculo com expedição, criados até **07/10/2026 13:07:38 UTC**, e registra a seleção do texto em `export_label.senave_program`. Pallets futuros recebem seus dados confirmados no formulário, sem AFIDI ou declaração automaticamente atribuídos pela importação.
 
 Campos desconhecidos continuam como **No informado/No informada**. A etiqueta requer sincronização confirmada antes da impressão definitiva. QR continua usando apenas o token de rastreabilidade; documento de produtor, coordenadas, armadilhas e histórico não são expostos ao acesso público ou ao destinatário de Uruguay.
 
