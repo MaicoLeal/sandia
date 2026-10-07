@@ -10,6 +10,7 @@ import {
   palletLabelData,
   palletLabelEditValues,
   palletLabelDeclaration,
+  palletLabelProducerIdentity,
   palletLabelRows,
   SENAVE_DECLARATION,
 } from "./services/pallet-label-data";
@@ -114,12 +115,40 @@ describe("datos de la etiqueta de exportación", () => {
     data.producers[0].document = "12345678-9";
     data.field_lots[0].harvest_date = null;
     const label = palletLabelData(data, pallet);
+    expect(label.producerInternalCode).toBe("No asignado");
     expect(label.producerCode).toBe("No informado");
     expect(label.origin).toBe("No informado");
     expect(label.afidi).toBe("No informado");
     expect(label.harvest).toBe("No informada");
     expect(label.packaged).toBe("No informada");
     expect(label.reception).toBe("01/10/2026");
+    const identity = palletLabelProducerIdentity(label);
+    expect(identity).not.toContain("Código interno Agronorte");
+    expect(identity).not.toContain(data.producers[0].document);
+    expect(identity).not.toContain(data.producers[0].id);
+  });
+
+  it("identifica el productor con su código interno sin sustituir el código oficial de la etiqueta", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      internal_code: " AGN-0001 ",
+      export_code: "SENAVE-123",
+    };
+    pallet.metadata = { export_label: { producer_code: "SENAVE-456" } };
+    const label = palletLabelData(data, pallet);
+    expect(label.producerInternalCode).toBe("AGN-0001");
+    expect(label.producerCode).toBe("SENAVE-456");
+    expect(palletLabelEditValues(data, pallet).producer_code).toBe(
+      "SENAVE-456",
+    );
+    expect(palletLabelProducerIdentity(label)).toBe(
+      "Productor: Elias Galeano   |   Código interno Agronorte: AGN-0001   |   Responsable: Operador de prueba",
+    );
+    expect(palletLabelRows(label)).toHaveLength(7);
+    expect(palletLabelRows(label)).toContainEqual({
+      title: "CÓDIGO DEL PRODUCTOR",
+      value: "SENAVE-456",
+    });
   });
 
   it("muestra los códigos y el origen oficial del productor, y la cosecha real del lote", () => {
@@ -184,6 +213,7 @@ describe("datos de la etiqueta de exportación", () => {
     const { data, pallet } = fixture();
     const organizationId = pallet.organization_id;
     data.producers[0].metadata = {
+      internal_code: "AGN-0001",
       export_code: "CODE-1",
       export_origin: "San Pedro",
     };
@@ -201,7 +231,11 @@ describe("datos de la etiqueta de exportación", () => {
       ...data.producers[0],
       ...base(organizationId),
       name: "Otro productor",
-      metadata: { export_code: "CODE-2", export_origin: "Caaguazú" },
+      metadata: {
+        internal_code: "AGN-0002",
+        export_code: "CODE-2",
+        export_origin: "Caaguazú",
+      },
     };
     data.producers.push(secondProducer);
     const secondLot = {
@@ -227,6 +261,10 @@ describe("datos de la etiqueta de exportación", () => {
     });
     const label = palletLabelData(data, pallet);
     expect(label.producer).toBe("Elias Galeano / Otro productor");
+    expect(label.producerInternalCode).toBe("AGN-0001 / AGN-0002");
+    expect(palletLabelProducerIdentity(label)).toContain(
+      "Código interno Agronorte: AGN-0001 / AGN-0002",
+    );
     expect(label.producerCode).toBe("CODE-1 / CODE-2");
     expect(label.origin).toBe("San Pedro / Caaguazú");
     expect(label.lots).toBe("SAN-20261001-DEMO01 / LOT-2");
@@ -255,6 +293,7 @@ describe("datos de la etiqueta de exportación", () => {
     data.pallet_items = [];
     expect(palletLabelData(data, pallet)).toMatchObject({
       producer: "No informado",
+      producerInternalCode: "No asignado",
       producerCode: "No informado",
       lots: "No informado",
       reception: "No informada",
@@ -299,6 +338,10 @@ describe("PDF A4 horizontal del pallet", () => {
     "genera una única página de 297 × 210 mm con QR y datos (programa %s)",
     (senaveProgram) => {
       const { data, pallet } = fixture();
+      data.producers[0].metadata = {
+        internal_code: "AGN-0001",
+        export_code: "SENAVE-123",
+      };
       pallet.metadata = {
         export_label: { senave_program: senaveProgram, afidi: "1571652" },
       };
@@ -320,6 +363,8 @@ describe("PDF A4 horizontal del pallet", () => {
         })
         .join("\n");
       expect(contents).toContain("PAL-TEST-390");
+      expect(contents).toContain("AGN-0001");
+      expect(contents).toContain("SENAVE-123");
       expect(contents).toContain("390");
       expect(contents).toContain("1571652");
       expect(raw).toContain("/Subtype /Image");

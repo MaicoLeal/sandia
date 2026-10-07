@@ -12,6 +12,7 @@ import type { Data, Pallet } from "./types";
 import {
   palletLabelData,
   palletLabelDeclaration,
+  palletLabelProducerIdentity,
   palletLabelRows,
 } from "./services/pallet-label-data";
 export function Brand() {
@@ -237,12 +238,7 @@ export function Label({
             alt="Cooperativa Agronorte"
           />
           <div className="export-label-context">
-            <span>
-              Productor: <strong>{label.producer}</strong>
-            </span>
-            <span>
-              Responsable: <strong>{label.responsible}</strong>
-            </span>
+            <span>{palletLabelProducerIdentity(label)}</span>
           </div>
         </header>
         <div className="export-label-main">

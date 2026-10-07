@@ -58,6 +58,7 @@ import {
   LOCAL_KEY,
   origin,
   parseKg,
+  producerIdentity,
   receptionTotal,
   round,
   summary,
@@ -125,7 +126,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.06-6 · AFIDI en etiquetas";
+const appVersion = "2026.10.07-1 · Códigos de productores";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1433,7 +1434,7 @@ function WorkspaceApp() {
                   <Search size={18} />
                   <input
                     aria-label="Buscar productor"
-                    placeholder="Nombre o comunidad…"
+                    placeholder="Nombre, código o comunidad…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
@@ -1444,7 +1445,13 @@ function WorkspaceApp() {
               <div className="card-grid">
                 {data.producers
                   .filter((p) =>
-                    (p.name + " " + p.community)
+                    [
+                      p.name,
+                      p.community,
+                      p.metadata?.internal_code,
+                      p.metadata?.export_code,
+                    ]
+                      .join(" ")
                       .toLowerCase()
                       .includes(search.toLowerCase()),
                   )
@@ -1461,6 +1468,13 @@ function WorkspaceApp() {
                         <Badge>{p.status}</Badge>
                       </div>
                       <h2>{p.name}</h2>
+                      <p className="hint">
+                        Código Agronorte:{" "}
+                        <strong>
+                          {p.metadata?.internal_code?.trim() ||
+                            "Pendiente de asignar"}
+                        </strong>
+                      </p>
                       <p>{p.community || "Localidad no registrada"}</p>
                       <div className="producer-total">
                         <strong>
@@ -1533,7 +1547,7 @@ function WorkspaceApp() {
                       .sort((a, b) => a.name.localeCompare(b.name, "es"))
                       .map((producer) => (
                         <option key={producer.id} value={producer.id}>
-                          {producer.name}
+                          {producerIdentity(producer)}
                         </option>
                       ))}
                   </select>
@@ -2032,6 +2046,19 @@ function WorkspaceApp() {
                   defaultValue={editingProducer?.name}
                 />
               </Field>
+              <Field label="Código interno Agronorte">
+                <input
+                  readOnly
+                  value={
+                    editingProducer?.metadata?.internal_code?.trim() ||
+                    "Pendiente de asignar"
+                  }
+                />
+              </Field>
+              <p className="hint">
+                Se asigna automáticamente al sincronizar y permanece vinculado
+                al productor para sus etiquetas.
+              </p>
               <div className="form-grid">
                 <Field label="Documento / RUC / CI">
                   <input
@@ -2080,7 +2107,7 @@ function WorkspaceApp() {
                     en Supabase.
                   </p>
                 )}
-                <Field label="Código del productor para exportación">
+                <Field label="Código oficial del productor para exportación">
                   <input
                     name="export_code"
                     maxLength={100}
@@ -3406,6 +3433,13 @@ function WorkspaceApp() {
         >
           <Badge>{producer.status}</Badge>
           <h2>{producer.name}</h2>
+          <p className="hint">
+            Código Agronorte:{" "}
+            <strong>
+              {producer.metadata?.internal_code?.trim() ||
+                "Pendiente de asignar"}
+            </strong>
+          </p>
           {can(role, "correct") && (
             <button
               className="button secondary full"
@@ -3782,7 +3816,7 @@ function ReceptionForm({
             .filter((p) => p.status === "Activo")
             .map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {producerIdentity(p)}
               </option>
             ))}
         </select>

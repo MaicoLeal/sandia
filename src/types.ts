@@ -15,7 +15,11 @@ export interface Base {
   status: string;
 }
 export interface Producer extends Base {
-  metadata?: { export_code?: string; export_origin?: string } | null;
+  metadata?: {
+    internal_code?: string;
+    export_code?: string;
+    export_origin?: string;
+  } | null;
   name: string;
   document: string;
   phone: string;

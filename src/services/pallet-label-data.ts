@@ -6,6 +6,7 @@ export const SENAVE_DECLARATION =
 export interface PalletLabelData {
   code: string;
   producer: string;
+  producerInternalCode: string;
   producerCode: string;
   origin: string;
   netKg: number;
@@ -61,6 +62,9 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
     code: pallet.code,
     producer:
       join(sources.map((source) => source.producer?.name)) || "No informado",
+    producerInternalCode:
+      join(sources.map((source) => source.producer?.metadata?.internal_code)) ||
+      "No asignado",
     producerCode:
       fields?.producer_code?.trim() ||
       join(sources.map((source) => source.producer?.metadata?.export_code)) ||
@@ -89,6 +93,16 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
     responsible: pallet.responsible,
     senaveProgram: fields?.senave_program === true,
   };
+}
+export function palletLabelProducerIdentity(label: PalletLabelData) {
+  const internalCode = label.producerInternalCode.trim();
+  return [
+    `Productor: ${label.producer}`,
+    ...(internalCode && internalCode !== "No asignado"
+      ? [`Código interno Agronorte: ${internalCode}`]
+      : []),
+    `Responsable: ${label.responsible}`,
+  ].join("   |   ");
 }
 export function palletLabelRows(label: PalletLabelData) {
   return [

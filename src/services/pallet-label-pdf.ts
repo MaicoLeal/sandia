@@ -1,5 +1,9 @@
 import { jsPDF } from "jspdf";
-import { palletLabelDeclaration, palletLabelRows } from "./pallet-label-data";
+import {
+  palletLabelDeclaration,
+  palletLabelProducerIdentity,
+  palletLabelRows,
+} from "./pallet-label-data";
 import type { PalletLabelData } from "./pallet-label-data";
 
 export function labelPrintFontSizes(label: PalletLabelData) {
@@ -55,7 +59,7 @@ export function createPalletLabelPdf(
   pdf.setTextColor(20, 30, 20);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);
-  const headerText = `Productor: ${label.producer}   |   Responsable: ${label.responsible}`;
+  const headerText = palletLabelProducerIdentity(label);
   const headerLines = pdf.splitTextToSize(headerText, 264) as string[];
   if (headerLines.length > 2)
     throw new Error(

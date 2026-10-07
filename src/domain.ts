@@ -1,4 +1,4 @@
-import type { Base, Data, Role, Pallet } from "./types";
+import type { Base, Data, Role, Pallet, Producer } from "./types";
 export const lossReasons = [
   "Fruta dañada",
   "Tamaño fuera del estándar",
@@ -67,6 +67,10 @@ export function base(
 }
 export function code(prefix: string) {
   return `${prefix}-${day().replaceAll("-", "")}-${crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+}
+export function producerIdentity(producer: Producer) {
+  const internalCode = producer.metadata?.internal_code?.trim();
+  return internalCode ? `${producer.name} · ${internalCode}` : producer.name;
 }
 export function origin(data: Data, receptionId: string) {
   const reception = data.receptions.find((x) => x.id === receptionId);
