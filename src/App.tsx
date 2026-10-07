@@ -1102,7 +1102,9 @@ function WorkspaceApp() {
                   ? "Datos reales · local"
                   : workspace.pending
                     ? "Pendiente de sincronizar"
-                    : "Sincronizado"}
+                    : workspace.needsRefresh
+                      ? "Pendiente de confirmar"
+                      : "Sincronizado"}
               </span>
             </span>
             <button
