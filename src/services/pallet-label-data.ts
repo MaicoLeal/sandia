@@ -80,6 +80,26 @@ const harvestDatesForSources = (
     sourceHarvestDate(source, allowProducerReference),
   );
 };
+export function receptionPalletLabelValues(
+  data: Data,
+  receptionId: string,
+): PalletExportLabel {
+  const source = origin(data, receptionId);
+  const organizationId = source.reception?.organization_id;
+  if (
+    !organizationId ||
+    source.reception?.status === "Cancelado" ||
+    [source.lot, source.plot, source.farm, source.producer].some(
+      (record) => record && record.organization_id !== organizationId,
+    )
+  )
+    return {};
+  return {
+    producer_code: producerReferenceCodes([source]),
+    origin: source.producer?.metadata?.export_origin?.trim() || "",
+    harvest_date: sourceHarvestDate(source, true),
+  };
+}
 export function palletLabelEditValues(
   data: Data,
   pallet: Pallet,

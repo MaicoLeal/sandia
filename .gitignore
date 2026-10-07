@@ -3,6 +3,7 @@ node_modules/
 .lock-generation/
 .toolchain/
 outputs/
+output/
 dist/
 .env
 .env.local

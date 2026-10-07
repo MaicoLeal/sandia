@@ -129,6 +129,7 @@ import {
   palletLabelReview,
   SENAVE_DECLARATION,
 } from "./services/pallet-label-data";
+import { palletCreationLabelValues } from "./services/pallet-creation-label";
 import {
   filterTrapInstallations,
   trapInstallationRows,
@@ -140,7 +141,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-12 · Guardado por cuenta e impresión libre";
+const appVersion = "2026.10.07-13 · Datos de la carga en las etiquetas";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -4566,6 +4567,7 @@ function PalletForm({
 }) {
   const [id, setId] = useState(selectedReception ?? "");
   const [netWeight, setNetWeight] = useState("");
+  const [destination, setDestination] = useState("Uruguay");
   const netNumber = /^\d+(?:[.,]\d{1,2})?$/.test(netWeight.trim())
     ? Number(netWeight.replace(",", "."))
     : null;
@@ -4616,7 +4618,12 @@ function PalletForm({
           />
         </Field>
         <Field label="Destino *">
-          <input name="destination" required defaultValue="Uruguay" />
+          <input
+            name="destination"
+            required
+            value={destination}
+            onChange={(event) => setDestination(event.target.value)}
+          />
         </Field>
         <Field label="Peso neto por pallet (kg) *">
           <NumericInput
@@ -4664,23 +4671,71 @@ function PalletForm({
       <Field label="Observaciones">
         <textarea name="notes" />
       </Field>
-      <details className="optional-fields">
-        <summary>Datos de exportación para etiqueta</summary>
-        <p className="hint">
-          Opcionales. Complete únicamente los datos confirmados; los mismos
-          datos se aplican a todos los pallets creados aquí.
-        </p>
-        {exportFieldsEnabled ? (
-          <ExportLabelFields importerEnabled={importerFieldsEnabled} />
-        ) : (
+      {exportFieldsEnabled ? (
+        <PalletCreationLabelFields
+          key={`${id}:${destination.trim().toLocaleLowerCase("es") === "uruguay" ? "uruguay" : "otro"}`}
+          data={data}
+          receptionId={id}
+          destination={destination}
+          importerEnabled={importerFieldsEnabled}
+        />
+      ) : (
+        <section className="panel inset">
+          <h3>Datos de la etiqueta</h3>
           <p className="hint">
             El administrador debe activar la actualización de etiquetas en
             Supabase.
           </p>
-        )}
-      </details>
+        </section>
+      )}
       <Submit disabled={busy || !tareEnabled}>Crear pallets</Submit>
     </form>
+  );
+}
+function PalletCreationLabelFields({
+  data,
+  receptionId,
+  destination,
+  importerEnabled,
+}: {
+  data: Data;
+  receptionId: string;
+  destination: string;
+  importerEnabled: boolean;
+}) {
+  // Keep operator edits during renders. The parent resets this form only when
+  // the selected reception or Uruguay/other destination context changes.
+  const [preset] = useState(() =>
+    palletCreationLabelValues(data, receptionId, destination, day()),
+  );
+  return (
+    <section className="panel inset" aria-label="Datos de la etiqueta">
+      <h3>Datos de la etiqueta</h3>
+      {preset.usesTodayLoad ? (
+        <p className="hint" role="status">
+          Datos de la carga de hoy. AFIDI, importador y envasado ya están
+          completados; verifíquelos antes de crear. Puede editarlos aquí.
+        </p>
+      ) : preset.loadConflict ? (
+        <p className="hint" role="status">
+          Hay datos distintos en las cargas de hoy. Complete el AFIDI,
+          importador y envasado correspondientes a estos pallets.
+        </p>
+      ) : (
+        <p className="hint">
+          Complete los datos confirmados de esta carga. No se reutilizan
+          documentos de otra fecha ni de otro destino.
+        </p>
+      )}
+      <p className="hint">
+        Código, origen y cosecha corresponden a la recepción seleccionada.
+        Estos datos se guardan en todos los pallets que cree aquí.
+      </p>
+      <ExportLabelFields
+        value={preset.value}
+        importerEnabled={importerEnabled}
+      />
+    </section>
   );
 }
 function ExportLabelFields({
