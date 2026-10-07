@@ -14,12 +14,14 @@ O `CÓDIGO DEL PRODUCTOR` usa os códigos SPE/CAN reais dos produtores vinculado
 
 Uma data única de colheita na etiqueta só é preenchida quando todas as origens do pallet têm a mesma data confirmada e compatível. Pallets com datas distintas mantêm suas origens para conferência no aplicativo. O resultado do SQL mostra as pendências e os dados encontrados.
 
+Na versão **2026.10.07-7**, a leitura da etiqueta também ignora um `export_code` antigo composto somente por códigos internos AGN quando falta SPE/CAN. O campo permanece pendente para confirmação, e o número interno continua no rodapé. A etiqueta pode mostrar uma referência de colheita confirmada e compatível mesmo quando a data ainda não foi gravada no lote; nesse caso, o relatório informa especificamente a pendência do campo do lote para revisão.
+
 Pesos líquidos, brutos, tara, quantidade de frutas, datas de recepção, códigos de lote/pallet e tokens do QR são preservados. Lotes encerrados, pallets expedidos ou vinculados a expedição e registros de outras organizações são conservados. Cada alteração usa a auditoria existente, com antes/depois, motivo e identidade real da sessão SQL; a revisão da organização avança uma vez quando há mudanças. Etiquetas alteradas voltam a `En armado` para nova impressão.
 
 ## Aplicação e conferência
 
 1. Guarde formulários abertos e use **Configuración → Descargar respaldo local** nos dispositivos com novas entradas.
-2. Confirme que as entradas foram sincronizadas. Se aparecer erro, use a versão **2026.10.07-6** e registre a mensagem completa com código. Concilie um eventual conflito de revisão antes de executar uma nova alteração administrativa; não apague o cache e não force a revisão.
+2. Confirme que as entradas foram sincronizadas. Se aparecer erro, use a versão **2026.10.07-7** e registre a mensagem completa com código. Concilie um eventual conflito de revisão antes de executar uma nova alteração administrativa; não apague o cache e não force a revisão.
 3. No SQL Editor do projeto **znbtwkhktlldzhkiwodu**, execute a operação completa, incluindo sua transação e consultas finais. Ela verifica as dependências e a auditoria antes de atualizar. Se indicar uma dependência ausente, aplique o pacote completo preparado para esta instalação, em vez de executar partes fora de ordem.
 4. Confira no resultado os pallets incluídos, o AFIDI **1571652**, a embalagem **2026-10-07**, o código do produtor e as pendências de colheita/código. Os totais e pesos devem corresponder aos lançamentos feitos no aplicativo.
 5. Atualize os dados no aplicativo e abra **Pallets → produtor → Etiqueta / QR**. Confira a prévia e gere novamente a impressão A4 paisagem ou o PDF das etiquetas alteradas. O QR continua com o mesmo identificador.

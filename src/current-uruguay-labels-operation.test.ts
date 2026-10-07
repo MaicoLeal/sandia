@@ -101,7 +101,7 @@ beforeAll(async () => {
     [4, "2025-10-01", "Confirmado", 2025, ""],
     [5, "2026-10-08", "Confirmado", 2026, ""],
     [6, "2026-10-02", "Confirmado", 2026, ""],
-    [7, "2026-10-06", "Confirmado", 2026, ""],
+    [7, "2026-10-06", "Confirmado", 2026, " AGN-0007 "],
     [8, "2026-10-06", "Confirmado", 2026, ""],
     [9, "2026-10-06", "Confirmado", 2026, "REGISTRO-OFICIAL"],
     [10, "2026-10-06", null, 2026, ""],
@@ -439,7 +439,7 @@ describe.sequential("actualización de etiquetas actuales de Uruguay", () => {
   });
 
   it("deriva todos los códigos SPE/CAN sin usar AGN y mantiene cosecha dinámica con varias fechas", async () => {
-    await db.exec(operation);
+    const results = await db.exec(operation);
     const pallets = await rows("pallets");
     expect(label(pallets, 16).producer_code).toContain("SPE-PRUEBA-001-SAN");
     expect(label(pallets, 16).producer_code).toContain("CAN-PRUEBA-002-SAN");
@@ -458,6 +458,14 @@ describe.sequential("actualización de etiquetas actuales de Uruguay", () => {
     for (const number of [11, 19])
       expect(label(pallets, number).producer_code ?? "").toBe("");
     expect(JSON.stringify(label(pallets, 20))).not.toContain("AGN-");
+    const report = results
+      .flatMap((result) => result.rows)
+      .find((row) => row.pallet === "PAL-PRUEBA-11");
+    expect(report).toBeDefined();
+    expect(report?.codigo_del_productor).toBeNull();
+    expect(report?.pendientes).toContain(
+      "Código de productor pendiente para una o más procedencias",
+    );
   });
 
   it("no inventa envasado cuando recepción, cosecha del lote o de etiqueta superan el 07/10; permite AFIDI y código seguros", async () => {

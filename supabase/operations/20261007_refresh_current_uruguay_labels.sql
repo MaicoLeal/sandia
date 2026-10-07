@@ -236,7 +236,7 @@ with sources as (
       then agronorte_private.trap_reference_codes(p.organization_id,pr.id)
       when jsonb_array_length(agronorte_private.trap_reference_codes(p.organization_id,pr.id))>0 then '[]'::jsonb
       when nullif(trim(pr.metadata->>'export_code'),'') is not null
-        and (pr.metadata->>'export_code')!~*'^AGN-[0-9]+(\s*/\s*AGN-[0-9]+)*$'
+        and trim(pr.metadata->>'export_code')!~*'^AGN-[0-9]+(\s*/\s*AGN-[0-9]+)*$'
       then jsonb_build_array(trim(pr.metadata->>'export_code')) else '[]'::jsonb end as producer_codes
   from public.pallets p join public.pallet_items i on i.pallet_id=p.id and i.organization_id=p.organization_id and i.status<>'Cancelado'
   join public.receptions r on r.id=i.reception_id and r.organization_id=i.organization_id
@@ -276,7 +276,7 @@ select p.code as pallet,s.producers as productores,s.lots as lotes,p.status as e
     case when coalesce(s.chronology_conflict,false)
       or nullif(p.metadata#>>'{export_label,harvest_date}','')::date> '2026-10-07'::date then 'Conflicto cronológico: conservar y revisar fechas' end,
     case when coalesce(s.pending_reference,false) then 'Cosecha del productor pendiente de confirmar' end,
-    case when nullif(p.metadata#>>'{export_label,harvest_date}','') is null and not coalesce(s.all_harvest_known,false) then 'Cosecha de origen incompleta' end,
+    case when nullif(p.metadata#>>'{export_label,harvest_date}','') is null and not coalesce(s.all_harvest_known,false) then 'Cosecha no guardada en uno o más lotes: revisar referencia del productor en la etiqueta' end,
     case when nullif(p.metadata#>>'{export_label,harvest_date}','') is null and s.harvest_date_count>1 then 'Varias cosechas: etiqueta usa fechas de cada origen, sin fecha única' end,
     case when nullif(trim(p.metadata#>>'{export_label,producer_code}'),'') is null and not coalesce(s.all_codes_known,false) then 'Código de productor pendiente para una o más procedencias' end,
     case when nullif(trim(p.metadata#>>'{export_label,producer_code}'),'') is null and length(c.source_codes)>100 then 'Códigos múltiples conservados por origen: superan límite de campo único' end

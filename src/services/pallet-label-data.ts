@@ -23,6 +23,7 @@ export interface PalletLabelData {
 }
 const join = (values: (string | null | undefined)[]) =>
   [...new Set(values.map((v) => v?.trim()).filter(Boolean))].join(" / ");
+const internalProducerCode = /^AGN-\d+(?:\s*\/\s*AGN-\d+)*$/i;
 const producerReferenceCodes = (sources: ReturnType<typeof origin>[]) =>
   join(
     sources.flatMap((source) => {
@@ -30,9 +31,12 @@ const producerReferenceCodes = (sources: ReturnType<typeof origin>[]) =>
         source.producer?.metadata?.trap_reference_codes?.filter((value) =>
           value.trim(),
         );
+      const exportCode = source.producer?.metadata?.export_code?.trim();
       return references?.length
         ? references
-        : [source.producer?.metadata?.export_code];
+        : exportCode && !internalProducerCode.test(exportCode)
+          ? [exportCode]
+          : [];
     }),
   );
 const validIsoDate = (value: string | null | undefined): value is string => {

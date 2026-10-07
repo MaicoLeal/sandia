@@ -89,6 +89,31 @@ function harvestReference(
 }
 
 describe("datos de la etiqueta de exportación", () => {
+  it("mantiene AGN como identificación interna cuando un código de exportación legado solo contiene AGN", () => {
+    for (const exportCode of [" AGN-0001 ", "agn-0001 / AGN-0002"]) {
+      const { data, pallet } = fixture();
+      data.producers[0].metadata = {
+        internal_code: "AGN-0001",
+        export_code: exportCode,
+        trap_reference_codes: [],
+      };
+      pallet.metadata = { export_label: { producer_code: "" } };
+      const before = structuredClone(data.producers[0].metadata);
+      const label = palletLabelData(data, pallet);
+      expect(label.producerCode).toBe("No informado");
+      expect(label.producerInternalCode).toBe("AGN-0001");
+      expect(palletLabelEditValues(data, pallet).producer_code).toBe("");
+      expect(palletLabelRows(label)).toContainEqual({
+        title: "CÓDIGO DEL PRODUCTOR",
+        value: "No informado",
+      });
+      expect(palletLabelProducerIdentity(label)).toContain(
+        "Código interno Agronorte: AGN-0001",
+      );
+      expect(data.producers[0].metadata).toEqual(before);
+    }
+  });
+
   it("conserva el modelo legado sin inventar un importador desde el comprador de la expedición", () => {
     const { data, pallet } = fixture();
     const shipment = {

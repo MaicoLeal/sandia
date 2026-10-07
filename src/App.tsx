@@ -136,7 +136,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-6 · Mensajes de sincronización";
+const appVersion = "2026.10.07-7 · Etiquetas de nuevas recepciones";
 
 function AppUpdateControls({
   blockedReason = "",
