@@ -18,6 +18,8 @@ export interface PalletLabelData {
   destination: string;
   responsible: string;
   senaveProgram: boolean;
+  importerName: string;
+  importerAddress: string;
 }
 const join = (values: (string | null | undefined)[]) =>
   [...new Set(values.map((v) => v?.trim()).filter(Boolean))].join(" / ");
@@ -138,7 +140,15 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
     destination: pallet.destination,
     responsible: pallet.responsible,
     senaveProgram: fields?.senave_program === true,
+    importerName: fields?.importer_name?.trim() || "",
+    importerAddress: fields?.importer_address?.trim() || "",
   };
+}
+export function palletLabelImporterRows(label: PalletLabelData) {
+  return [
+    { title: "IMPORTADOR", value: label.importerName.trim(), name: true },
+    { title: "DIRECCIÓN", value: label.importerAddress.trim(), name: false },
+  ].filter((row) => row.value);
 }
 export function palletLabelProducerIdentity(label: PalletLabelData) {
   const internalCode = label.producerInternalCode.trim();

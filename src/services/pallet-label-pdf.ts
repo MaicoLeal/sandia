@@ -1,10 +1,35 @@
 import { jsPDF } from "jspdf";
 import {
   palletLabelDeclaration,
+  palletLabelImporterRows,
   palletLabelProducerIdentity,
   palletLabelRows,
 } from "./pallet-label-data";
 import type { PalletLabelData } from "./pallet-label-data";
+
+export function labelImporterPrintLayout(label: PalletLabelData) {
+  if (label.importerName.length > 200 || label.importerAddress.length > 400)
+    throw new Error(
+      "El nombre del importador admite hasta 200 caracteres y la dirección hasta 400. Revise los datos.",
+    );
+  const measure = new jsPDF();
+  const titleHeight = 8.5 * 0.352778 * 1.1;
+  const lineHeight = 11 * 0.352778 * 1.05;
+  const rows = palletLabelImporterRows(label).map((row) => {
+    measure.setFont("helvetica", row.name ? "bold" : "normal");
+    measure.setFontSize(11);
+    const lines = measure.splitTextToSize(row.value, 171) as string[];
+    return { ...row, lines, height: titleHeight + lines.length * lineHeight };
+  });
+  const height =
+    rows.reduce((total, row) => total + row.height, 0) +
+    Math.max(0, rows.length - 1);
+  if (height > 42)
+    throw new Error(
+      "Los datos del importador no caben en el encabezado A4 a 11 puntos. Revise su longitud o los saltos de línea.",
+    );
+  return { rows, height, titleHeight, lineHeight };
+}
 
 export function labelPrintFontSizes(label: PalletLabelData) {
   const measure = new jsPDF();
@@ -50,12 +75,46 @@ export function createPalletLabelPdf(
   pdf.setDrawColor(0, 111, 50);
   pdf.setLineWidth(1.2);
   pdf.roundedRect(8, 8, 281, 194, 3, 3);
+  const importer = labelImporterPrintLayout(label);
+  const hasImporter = importer.rows.length > 0;
+  const logoWidth = hasImporter ? 85 : 140;
+  const logoHeight = (logoWidth * 47) / 140;
+  const logoX = hasImporter ? 13 : 78.5;
+  const logoY = 13 + (47 - logoHeight) / 2;
   pdf.saveGraphicsState();
-  pdf.rect(78.5, 13, 140, 47, null);
+  pdf.rect(logoX, logoY, logoWidth, logoHeight, null);
   pdf.clip();
   pdf.discardPath();
-  pdf.addImage(assets.logo, "PNG", 78.5, -2.875, 140, 78.75);
+  const imageHeight = (logoWidth * 78.75) / 140;
+  pdf.addImage(
+    assets.logo,
+    "PNG",
+    logoX,
+    logoY - (imageHeight - logoHeight) / 2,
+    logoWidth,
+    imageHeight,
+  );
   pdf.restoreGraphicsState();
+  if (hasImporter) {
+    pdf.setDrawColor(0, 111, 50);
+    pdf.setLineWidth(0.5);
+    pdf.rect(107, 13, 177, 47);
+    let cursor = 13 + (47 - importer.height) / 2;
+    for (const row of importer.rows) {
+      pdf.setTextColor(0, 80, 35);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8.5);
+      pdf.text(row.title, 110, cursor + 8.5 * 0.352778 * 0.82);
+      cursor += importer.titleHeight;
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFont("helvetica", row.name ? "bold" : "normal");
+      pdf.setFontSize(11);
+      pdf.text(row.lines, 110, cursor + 11 * 0.352778 * 0.82, {
+        lineHeightFactor: 1.05,
+      });
+      cursor += row.lines.length * importer.lineHeight + 1;
+    }
+  }
   pdf.setTextColor(20, 30, 20);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(9);

@@ -135,7 +135,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-2 · Referencias SPE/CAN";
+const appVersion = "2026.10.07-3 · Importador en etiqueta";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -264,7 +264,20 @@ const number = (form: HTMLFormElement, key: string) => {
 };
 const optionalNumber = (form: HTMLFormElement, key: string) =>
   text(form, key) ? number(form, key) : null;
-const exportLabelFromForm = (form: HTMLFormElement): PalletExportLabel => ({
+const exportLabelFromForm = (
+  form: HTMLFormElement,
+  previous?: PalletExportLabel,
+): PalletExportLabel => ({
+  ...(new FormData(form).has("importer_name")
+    ? { importer_name: text(form, "importer_name") }
+    : previous?.importer_name !== undefined
+      ? { importer_name: previous.importer_name }
+      : {}),
+  ...(new FormData(form).has("importer_address")
+    ? { importer_address: text(form, "importer_address") }
+    : previous?.importer_address !== undefined
+      ? { importer_address: previous.importer_address }
+      : {}),
   afidi: text(form, "afidi"),
   packaged_date: text(form, "packaged_date") || null,
   harvest_date: text(form, "export_harvest_date") || null,
@@ -564,6 +577,8 @@ function WorkspaceApp() {
   const actor = workspace.profile?.name ?? "Operador local";
   const exportFieldsEnabled =
     workspace.localOnly || Boolean(workspace.features?.label_export_data);
+  const importerFieldsEnabled =
+    workspace.localOnly || Boolean(workspace.features?.label_importer_details);
   const draftKey = org + ":" + (user ?? "local") + ":reception";
   const record = (
     d: Data,
@@ -2648,6 +2663,7 @@ function WorkspaceApp() {
               actor={actor}
               busy={busy}
               exportFieldsEnabled={exportFieldsEnabled}
+              importerFieldsEnabled={importerFieldsEnabled}
               tareEnabled={palletTareEnabled}
               selectedReception={selectedReception}
               onSave={async (form) => {
@@ -2747,7 +2763,10 @@ function WorkspaceApp() {
                       throw new Error(
                         "Indique el motivo del registro o corrección.",
                       );
-                    const fields = exportLabelFromForm(form);
+                    const fields = exportLabelFromForm(
+                      form,
+                      current.metadata?.export_label,
+                    );
                     const canEditDestination =
                       workspace.localOnly ||
                       Boolean(workspace.features?.label_destination_edit);
@@ -2887,6 +2906,7 @@ function WorkspaceApp() {
                 )}
               <ExportLabelFields
                 value={palletLabelEditValues(data, currentLabel)}
+                importerEnabled={importerFieldsEnabled}
               />
               <Field label="Motivo del registro o corrección *">
                 <textarea
@@ -4246,6 +4266,7 @@ function PalletForm({
   busy,
   selectedReception,
   exportFieldsEnabled,
+  importerFieldsEnabled,
   tareEnabled,
   onSave,
 }: {
@@ -4254,6 +4275,7 @@ function PalletForm({
   busy: boolean;
   selectedReception: string | null;
   exportFieldsEnabled: boolean;
+  importerFieldsEnabled: boolean;
   tareEnabled: boolean;
   onSave: (form: HTMLFormElement) => Promise<void>;
 }) {
@@ -4364,7 +4386,7 @@ function PalletForm({
           datos se aplican a todos los pallets creados aquí.
         </p>
         {exportFieldsEnabled ? (
-          <ExportLabelFields />
+          <ExportLabelFields importerEnabled={importerFieldsEnabled} />
         ) : (
           <p className="hint">
             El administrador debe activar la actualización de etiquetas en
@@ -4376,9 +4398,40 @@ function PalletForm({
     </form>
   );
 }
-function ExportLabelFields({ value }: { value?: PalletExportLabel }) {
+function ExportLabelFields({
+  value,
+  importerEnabled,
+}: {
+  value?: PalletExportLabel;
+  importerEnabled: boolean;
+}) {
   return (
     <>
+      <Field label="Importador (razón social)">
+        <input
+          name="importer_name"
+          maxLength={200}
+          defaultValue={value?.importer_name}
+          disabled={!importerEnabled}
+          autoComplete="off"
+        />
+      </Field>
+      <Field label="Dirección del importador">
+        <textarea
+          name="importer_address"
+          maxLength={400}
+          rows={2}
+          defaultValue={value?.importer_address}
+          disabled={!importerEnabled}
+          autoComplete="off"
+        />
+      </Field>
+      {!importerEnabled && (
+        <p className="hint" role="status">
+          Para registrar el importador, aplique la actualización SQL de
+          importadores en Supabase y sincronice.
+        </p>
+      )}
       <Field label="N° de AFIDI">
         <input
           name="afidi"

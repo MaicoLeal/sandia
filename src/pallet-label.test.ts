@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
-import { beforeAll, describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { Label } from "./components";
 import { base, receptionTotal } from "./domain";
 import { seed } from "./test-fixtures";
 import type { Pallet, ProducerHarvestReference } from "./types";
@@ -10,6 +13,7 @@ import {
   palletLabelData,
   palletLabelEditValues,
   palletLabelDeclaration,
+  palletLabelImporterRows,
   palletLabelProducerIdentity,
   palletLabelRows,
   SENAVE_DECLARATION,
@@ -17,6 +21,7 @@ import {
 import {
   createPalletLabelPdf,
   labelPrintFontSizes,
+  labelImporterPrintLayout,
 } from "./services/pallet-label-pdf";
 
 function fixture() {
@@ -56,6 +61,19 @@ function pdfText(pdf: jsPDF) {
     .join("\n");
 }
 
+function labelMarkup(data: ReturnType<typeof fixture>["data"], pallet: Pallet) {
+  vi.stubGlobal("window", {
+    location: { origin: "https://example.invalid", pathname: "/" },
+  });
+  try {
+    return renderToStaticMarkup(
+      createElement(Label, { data, pallet, onPrinted: async () => {} }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 function harvestReference(
   date = "2026-09-29",
   status: ProducerHarvestReference["status"] = "Confirmado",
@@ -71,6 +89,97 @@ function harvestReference(
 }
 
 describe("datos de la etiqueta de exportación", () => {
+  it("conserva el modelo legado sin inventar un importador desde el comprador de la expedición", () => {
+    const { data, pallet } = fixture();
+    const shipment = {
+      ...base(pallet.organization_id, "En preparación"),
+      destination: "Uruguay",
+      country: "Uruguay",
+      customer: "Comprador de la carga",
+      carrier: "",
+      driver: "",
+      plate: "",
+      departure: "2026-10-07",
+      responsible: "Operador",
+      notes: "",
+    };
+    data.shipments.push(shipment);
+    data.shipment_pallets.push({
+      ...base(pallet.organization_id),
+      shipment_id: shipment.id,
+      pallet_id: pallet.id,
+    });
+    const label = palletLabelData(data, pallet);
+    expect(label).toMatchObject({ importerName: "", importerAddress: "" });
+    expect(palletLabelImporterRows(label)).toEqual([]);
+    expect(palletLabelEditValues(data, pallet).importer_name).toBeUndefined();
+    expect(palletLabelRows(label)).toHaveLength(7);
+    expect(labelMarkup(data, pallet)).not.toContain('aria-label="Importador"');
+    expect(labelMarkup(data, pallet)).not.toContain(shipment.customer);
+  });
+
+  it("imprime únicamente el importador específico del pallet sin asignarlo a otro pallet", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: {
+        importer_name: " IMPORTADOR DE PRUEBA SOCIEDAD ANÓNIMA ",
+        importer_address: " CALLE DE PRUEBA 534, CIUDAD DE PRUEBA, URUGUAY ",
+      },
+    };
+    const label = palletLabelData(data, pallet);
+    expect(label).toMatchObject({
+      importerName: "IMPORTADOR DE PRUEBA SOCIEDAD ANÓNIMA",
+      importerAddress: "CALLE DE PRUEBA 534, CIUDAD DE PRUEBA, URUGUAY",
+    });
+    expect(palletLabelImporterRows(label)).toEqual([
+      { title: "IMPORTADOR", value: label.importerName, name: true },
+      { title: "DIRECCIÓN", value: label.importerAddress, name: false },
+    ]);
+    const markup = labelMarkup(data, pallet);
+    expect(markup).toContain('aria-label="Importador"');
+    expect(markup).toContain(label.importerName);
+    expect(markup).toContain(label.importerAddress);
+    const otherPallet = {
+      ...pallet,
+      ...base(pallet.organization_id),
+      metadata: null,
+    };
+    expect(palletLabelData(data, otherPallet).importerName).toBe("");
+    expect(palletLabelData(data, otherPallet).importerAddress).toBe("");
+    expect(pallet.token).toBe("test-public-token");
+  });
+
+  it.each([
+    { importer_name: "Empresa", importer_address: "", expected: "IMPORTADOR" },
+    { importer_name: "", importer_address: "Calle 534", expected: "DIRECCIÓN" },
+  ])(
+    "admite un solo dato de importador sin crear un campo pendiente (%j)",
+    (fields) => {
+      const { data, pallet } = fixture();
+      pallet.metadata = { export_label: fields };
+      expect(
+        palletLabelImporterRows(palletLabelData(data, pallet)),
+      ).toHaveLength(1);
+      expect(
+        palletLabelImporterRows(palletLabelData(data, pallet))[0].title,
+      ).toBe(fields.expected);
+    },
+  );
+
+  it("escapa nombre y dirección del importador como texto en la etiqueta HTML", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: {
+        importer_name: '<script>alert("nombre")</script>',
+        importer_address: '<img src=x onerror="alert(1)"> & dirección',
+      },
+    };
+    const markup = labelMarkup(data, pallet);
+    expect(markup).toContain("&lt;script&gt;");
+    expect(markup).toContain("&lt;img src=x onerror=");
+    expect(markup).not.toContain("<script>");
+    expect(markup).not.toContain("<img src=x");
+  });
   it("prepara edición con los datos reales heredados y fechas ISO, sin asumir envasado ni AFIDI", () => {
     const { data, pallet } = fixture();
     data.producers[0].metadata = {
@@ -552,6 +661,98 @@ describe("PDF A4 horizontal del pallet", () => {
         { margin: 4, width: 800 },
       ),
     };
+  });
+
+  it("añade el importador confirmado conservando QR, SPE, AFIDI, lote y el modelo SENAVE en una página A4", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      internal_code: "AGN-0001",
+      trap_reference_codes: ["SPE-GUA-002-SAN"],
+    };
+    pallet.metadata = {
+      export_label: {
+        afidi: "1571652",
+        senave_program: true,
+        importer_name: "IMPORTADOR DE PRUEBA SOCIEDAD ANÓNIMA",
+        importer_address: "CALLE DE PRUEBA 534, CIUDAD DE PRUEBA, URUGUAY",
+      },
+    };
+    const before = JSON.stringify({ data, pallet });
+    const label = palletLabelData(data, pallet);
+    const pdf = createPalletLabelPdf(label, assets);
+    const contents = pdfText(pdf);
+    expect(pdf.getNumberOfPages()).toBe(1);
+    expect(pdf.internal.pageSize.getWidth()).toBeCloseTo(297, 1);
+    expect(pdf.internal.pageSize.getHeight()).toBeCloseTo(210, 1);
+    for (const text of [
+      "IMPORTADOR DE PRUEBA SOCIEDAD AN",
+      "CALLE DE PRUEBA",
+      "534",
+      "CIUDAD DE PRUEBA",
+      "URUGUAY",
+      "1571652",
+      "SPE-GUA-002-SAN",
+      "AGN-0001",
+      "PAL-TEST-390",
+      "Anastrepha grandis",
+      label.lots,
+    ])
+      expect(
+        contents.includes(text),
+        `Texto de etiqueta ausente: ${text}`,
+      ).toBe(true);
+    expect(pdf.output()).toContain("/Subtype /Image");
+    expect(JSON.stringify({ data, pallet })).toBe(before);
+    expect(labelImporterPrintLayout(label).height).toBeLessThanOrEqual(42);
+    expect(palletLabelRows(label)).toHaveLength(7);
+  });
+
+  it("mantiene 11 puntos y una sola página con nombre de 200 caracteres y dirección de 400 caracteres", () => {
+    const { data, pallet } = fixture();
+    const label = palletLabelData(data, pallet);
+    label.importerName =
+      "Empresa de prueba Sociedad Anónima - Comercial Importadora "
+        .repeat(5)
+        .slice(0, 200);
+    label.importerAddress =
+      "Calle de prueba 534, Ciudad de prueba, Uruguay. Oficina de recepción y depósito, acceso por la calle principal. "
+        .repeat(5)
+        .slice(0, 400);
+    expect(label.importerName).toHaveLength(200);
+    expect(label.importerAddress).toHaveLength(400);
+    const layout = labelImporterPrintLayout(label);
+    expect(layout.rows).toHaveLength(2);
+    expect(layout.height).toBeLessThanOrEqual(42);
+    for (const row of layout.rows) expect(row.lines.join(" ")).toBe(row.value);
+    const pdf = createPalletLabelPdf(label, assets);
+    expect(pdf.getNumberOfPages()).toBe(1);
+    expect(pdfText(pdf)).toContain("/F1 11 Tf");
+  });
+
+  it("rechaza un importador fuera de límites o con demasiados saltos de línea antes de imprimir", () => {
+    const { data, pallet } = fixture();
+    const label = palletLabelData(data, pallet);
+    label.importerName = "A".repeat(201);
+    expect(() => createPalletLabelPdf(label, assets)).toThrow(/200 caracteres/);
+    label.importerName = "Empresa";
+    label.importerAddress = "A".repeat(401);
+    expect(() => createPalletLabelPdf(label, assets)).toThrow(/400/);
+    label.importerAddress = "Calle\n".repeat(15);
+    expect(() => createPalletLabelPdf(label, assets)).toThrow(
+      /importador no caben/,
+    );
+  });
+
+  it("omite el bloque de importador en el PDF legado incluso con espacios vacíos", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: { importer_name: "  ", importer_address: "\n " },
+    };
+    const label = palletLabelData(data, pallet);
+    const pdf = createPalletLabelPdf(label, assets);
+    expect(pdfText(pdf)).not.toContain("IMPORTADOR");
+    expect(labelImporterPrintLayout(label).rows).toEqual([]);
+    expect(pdf.getNumberOfPages()).toBe(1);
   });
 
   it("limita la letra de campos de texto para impresión y ajusta un origen de 200 caracteres a dos líneas", () => {

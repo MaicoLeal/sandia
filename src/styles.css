@@ -1722,6 +1722,45 @@ th {
   padding-bottom: 14px;
   gap: 8px;
 }
+.export-label-brand-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.export-label-head:has(.export-label-importer) .export-label-brand-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.62fr);
+  gap: 24px;
+}
+.export-label-head:has(.export-label-importer) .export-label-logo {
+  width: 100%;
+}
+.export-label-importer {
+  min-width: 0;
+  border: 2px solid #006f32;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.export-label-importer strong {
+  display: block;
+  color: #006f32;
+  font-size: 11px;
+  line-height: 1.1;
+}
+.export-label-importer p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: pre-line;
+}
+.export-label-importer-name p {
+  font-weight: 700;
+}
 .print-label .export-label-logo {
   width: min(58%, 530px);
   height: auto;
@@ -1840,6 +1879,17 @@ th {
   .print-label .export-label-logo {
     width: 85%;
   }
+  .export-label-head:has(.export-label-importer) .export-label-brand-row {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 12px;
+  }
+  .export-label-head:has(.export-label-importer) .export-label-logo {
+    width: 85%;
+  }
+  .export-label-importer {
+    width: 100%;
+  }
   .export-label-context {
     font-size: 10px;
   }
@@ -1907,6 +1957,32 @@ th {
     height: 61.5mm;
     padding: 0 0 3mm;
     gap: 2mm;
+  }
+  .export-label-brand-row {
+    height: 47mm;
+  }
+  .export-label-head:has(.export-label-importer) .export-label-brand-row {
+    grid-template-columns: 85mm minmax(0, 1fr);
+    gap: 9mm;
+  }
+  .export-label-head:has(.export-label-importer) .export-label-logo {
+    width: 85mm;
+    height: 28.535714mm;
+  }
+  .export-label-importer {
+    height: 47mm;
+    border-width: 0.5mm;
+    padding: 2mm;
+    gap: 1mm;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .export-label-importer strong {
+    font-size: 8.5pt;
+    line-height: 1.1;
+  }
+  .export-label-importer p {
+    font-size: 11pt;
+    line-height: 1.05;
   }
   .print-label .export-label-logo {
     width: 140mm;

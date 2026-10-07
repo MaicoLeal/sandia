@@ -12,6 +12,7 @@ import type { Data, Pallet } from "./types";
 import {
   palletLabelData,
   palletLabelDeclaration,
+  palletLabelImporterRows,
   palletLabelProducerIdentity,
   palletLabelRows,
 } from "./services/pallet-label-data";
@@ -146,6 +147,7 @@ export function Label({
   const [printSizes, setPrintSizes] = useState<number[]>([]);
   const cancelled = pallet.status === "Cancelado";
   const label = palletLabelData(data, pallet);
+  const importerRows = palletLabelImporterRows(label);
   const publicBase =
     import.meta.env.VITE_PUBLIC_TRACE_URL ||
     window.location.origin + window.location.pathname;
@@ -232,11 +234,29 @@ export function Label({
       )}
       <div className="print-label export-label">
         <header className="export-label-head">
-          <img
-            className="export-label-logo"
-            src={import.meta.env.BASE_URL + "agronorte-logo.png"}
-            alt="Cooperativa Agronorte"
-          />
+          <div className="export-label-brand-row">
+            <img
+              className="export-label-logo"
+              src={import.meta.env.BASE_URL + "agronorte-logo.png"}
+              alt="Cooperativa Agronorte"
+            />
+            {importerRows.length > 0 && (
+              <section
+                className="export-label-importer"
+                aria-label="Importador"
+              >
+                {importerRows.map((row) => (
+                  <div
+                    key={row.title}
+                    className={row.name ? "export-label-importer-name" : ""}
+                  >
+                    <strong>{row.title}</strong>
+                    <p>{row.value}</p>
+                  </div>
+                ))}
+              </section>
+            )}
+          </div>
           <div className="export-label-context">
             <span>{palletLabelProducerIdentity(label)}</span>
           </div>

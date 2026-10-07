@@ -127,6 +127,8 @@ export interface Pallet extends Base {
   notes: string;
 }
 export interface PalletExportLabel {
+  importer_name?: string;
+  importer_address?: string;
   senave_program?: boolean;
   afidi?: string;
   packaged_date?: string | null;
@@ -198,6 +200,7 @@ export interface Workspace {
     recipient_access?: boolean;
     label_export_data?: boolean;
     label_destination_edit?: boolean;
+    label_importer_details?: boolean;
     pallet_corrections?: boolean;
     reception_management?: boolean;
     pallet_tare?: boolean;
