@@ -1712,6 +1712,53 @@ th {
 .label-format-note {
   margin-bottom: 16px;
 }
+.label-review,
+.label-record-summary {
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid #d7e3cb;
+  border-radius: 12px;
+  background: #f3f7ee;
+  overflow-wrap: anywhere;
+}
+.label-review > strong {
+  font-size: 14px;
+}
+.label-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 18px;
+  padding-left: 18px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.label-review-warnings {
+  margin: 10px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #725010;
+}
+.label-review-warnings li + li {
+  margin-top: 6px;
+}
+.label-review .hint,
+.label-record-summary .hint {
+  margin: 8px 0 0;
+}
+.label-record-summary dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.label-record-summary dt {
+  color: #54634c;
+}
+.label-record-summary dd {
+  margin: 0;
+  font-weight: 600;
+}
 .export-label.print-label {
   max-width: none;
   padding: 16px;
@@ -1873,6 +1920,9 @@ th {
   overflow-wrap: anywhere;
 }
 @media screen and (max-width: 780px) {
+  .label-checklist {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .export-label.print-label {
     padding: 10px;
     border-width: 3px;

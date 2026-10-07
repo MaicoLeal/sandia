@@ -15,7 +15,9 @@ import {
   palletLabelImporterRows,
   palletLabelProducerIdentity,
   palletLabelRows,
+  palletLabelReview,
 } from "./services/pallet-label-data";
+import type { PalletLabelReview } from "./services/pallet-label-data";
 export function Brand() {
   return (
     <div className="brand">
@@ -116,6 +118,38 @@ export function Submit({
       <CheckCircle2 size={18} />
       {children}
     </button>
+  );
+}
+export function LabelReview({ review }: { review: PalletLabelReview }) {
+  return (
+    <section
+      className="label-review no-print"
+      aria-label="Revisión de la etiqueta"
+    >
+      <strong>
+        {review.pending.length
+          ? `Datos por completar: ${review.pending.length}`
+          : "Campos de la etiqueta informados"}
+      </strong>
+      {review.pending.length > 0 && (
+        <ul className="label-checklist">
+          {review.pending.map((field) => (
+            <li key={field}>{field}</li>
+          ))}
+        </ul>
+      )}
+      {review.warnings.length > 0 && (
+        <ul className="label-review-warnings">
+          {review.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+      <p className="hint">
+        Revise los datos confirmados antes de imprimir. Los campos sin datos
+        permanecen identificados como no informados.
+      </p>
+    </section>
   );
 }
 export function Label({
@@ -232,6 +266,7 @@ export function Label({
           debe activar la actualización de etiquetas en Supabase.
         </p>
       )}
+      <LabelReview review={palletLabelReview(data, pallet)} />
       <div className="print-label export-label">
         <header className="export-label-head">
           <div className="export-label-brand-row">

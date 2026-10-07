@@ -90,6 +90,7 @@ import {
   Empty,
   Field,
   Label,
+  LabelReview,
   Modal,
   Submit,
   NumericInput,
@@ -123,6 +124,8 @@ import {
 } from "./services/operational-report-rows";
 import {
   palletLabelEditValues,
+  palletLabelData,
+  palletLabelReview,
   SENAVE_DECLARATION,
 } from "./services/pallet-label-data";
 import {
@@ -136,7 +139,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-7 · Etiquetas de nuevas recepciones";
+const appVersion = "2026.10.07-8 · Revisión de etiquetas y datos";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -2876,28 +2879,15 @@ function WorkspaceApp() {
                   </div>
                 </div>
               )}
-              <Field label="Destino del pallet *">
-                <input
-                  name="label_destination"
-                  maxLength={200}
-                  required
-                  defaultValue={currentLabel.destination}
-                  readOnly={
-                    !workspace.localOnly &&
-                    !workspace.features?.label_destination_edit
-                  }
-                />
-              </Field>
-              {!workspace.localOnly &&
-                !workspace.features?.label_destination_edit && (
-                  <p className="hint">
-                    La edición del destino requiere la actualización de
-                    etiquetas del administrador.
-                  </p>
-                )}
               <ExportLabelFields
                 value={palletLabelEditValues(data, currentLabel)}
                 importerEnabled={importerFieldsEnabled}
+                data={data}
+                pallet={currentLabel}
+                destinationEditable={
+                  workspace.localOnly ||
+                  Boolean(workspace.features?.label_destination_edit)
+                }
               />
               <Field label="Motivo del registro o corrección *">
                 <textarea
@@ -4392,18 +4382,87 @@ function PalletForm({
 function ExportLabelFields({
   value,
   importerEnabled,
+  data,
+  pallet,
+  destinationEditable = false,
 }: {
   value?: PalletExportLabel;
   importerEnabled: boolean;
+  data?: Data;
+  pallet?: Pallet;
+  destinationEditable?: boolean;
 }) {
-  const [packagedDate, setPackagedDate] = useState(value?.packaged_date ?? "");
+  const [draft, setDraft] = useState<PalletExportLabel>(() => ({ ...value }));
+  const [destination, setDestination] = useState(pallet?.destination ?? "");
+  const updateField = <K extends keyof PalletExportLabel>(
+    field: K,
+    next: PalletExportLabel[K],
+  ) => setDraft((previous) => ({ ...previous, [field]: next }));
+  const previewPallet = pallet
+    ? {
+        ...pallet,
+        destination,
+        metadata: { ...pallet.metadata, export_label: draft },
+      }
+    : null;
+  const preview =
+    data && previewPallet ? palletLabelData(data, previewPallet) : null;
   return (
     <>
+      {preview && (
+        <section className="label-record-summary" aria-label="Datos del pallet">
+          <dl>
+            <dt>Productor</dt>
+            <dd>{preview.producer}</dd>
+            <dt>Peso neto</dt>
+            <dd>
+              {Number.isFinite(preview.netKg) && preview.netKg > 0
+                ? `${kg(preview.netKg)} kg`
+                : "No informado"}
+            </dd>
+            <dt>Lote</dt>
+            <dd>{preview.lots}</dd>
+            <dt>Recepción</dt>
+            <dd>{preview.reception}</dd>
+            <dt>Responsable</dt>
+            <dd>{preview.responsible}</dd>
+          </dl>
+          <p className="hint">
+            El peso neto ya excluye la tara del pallet. Para corregir el peso o
+            responsable, use Editar pallet; para corregir la recepción, use
+            Recepción.
+          </p>
+        </section>
+      )}
+      {data && previewPallet && (
+        <LabelReview review={palletLabelReview(data, previewPallet)} />
+      )}
+      {pallet && (
+        <>
+          <Field label="Destino del pallet *">
+            <input
+              name="label_destination"
+              maxLength={200}
+              required
+              value={destination}
+              onChange={(event) => setDestination(event.target.value)}
+              readOnly={!destinationEditable}
+            />
+          </Field>
+          {!destinationEditable && (
+            <p className="hint">
+              La edición del destino requiere la actualización de etiquetas del
+              administrador.
+            </p>
+          )}
+        </>
+      )}
       <Field label="Importador (razón social)">
         <input
           name="importer_name"
           maxLength={200}
           defaultValue={value?.importer_name}
+          onChange={(event) => updateField("importer_name", event.target.value)}
           disabled={!importerEnabled}
           autoComplete="off"
         />
@@ -4414,6 +4473,9 @@ function ExportLabelFields({
           maxLength={400}
           rows={2}
           defaultValue={value?.importer_address}
+          onChange={(event) =>
+            updateField("importer_address", event.target.value)
+          }
           disabled={!importerEnabled}
           autoComplete="off"
         />
@@ -4430,6 +4492,8 @@ function ExportLabelFields({
           inputMode="numeric"
           maxLength={100}
           defaultValue={value?.afidi}
+          onChange={(event) => updateField("afidi", event.target.value)}
+          autoComplete="off"
         />
       </Field>
       <div className="form-grid">
@@ -4438,6 +4502,9 @@ function ExportLabelFields({
             type="date"
             name="export_harvest_date"
             defaultValue={value?.harvest_date ?? ""}
+            onChange={(event) =>
+              updateField("harvest_date", event.target.value || null)
+            }
           />
         </Field>
         <div>
@@ -4445,29 +4512,35 @@ function ExportLabelFields({
             <input
               type="date"
               name="packaged_date"
-              value={packagedDate}
-              onChange={(event) => setPackagedDate(event.target.value)}
+              value={draft.packaged_date ?? ""}
+              onChange={(event) =>
+                updateField("packaged_date", event.target.value || null)
+              }
             />
           </Field>
           <button
             type="button"
             className="button secondary"
-            onClick={() => setPackagedDate(day())}
+            onClick={() => updateField("packaged_date", day())}
           >
             Usar fecha de hoy
           </button>
         </div>
       </div>
       <p className="hint">
-        Si deja la cosecha vacía, se muestra la fecha registrada en el lote,
-        cuando exista. La fecha de envasado se confirma por separado; el botón
-        usa la fecha actual de Paraguay.
+        Si deja la cosecha vacía, se usa la fecha válida del lote o la
+        referencia confirmada del productor, compatible con esta recepción. Las
+        referencias pendientes no se imprimen. Confirme el envasado por
+        separado; el botón usa la fecha actual de Paraguay.
       </p>
       <Field label="Código del productor para esta etiqueta (opcional)">
         <input
           name="pallet_producer_code"
           maxLength={100}
           defaultValue={value?.producer_code}
+          onChange={(event) => updateField("producer_code", event.target.value)}
+          autoComplete="off"
+          autoCapitalize="characters"
         />
       </Field>
       <Field label="Origen confirmado para esta etiqueta (opcional)">
@@ -4475,18 +4548,24 @@ function ExportLabelFields({
           name="pallet_origin"
           maxLength={200}
           defaultValue={value?.origin}
+          onChange={(event) => updateField("origin", event.target.value)}
         />
       </Field>
       <p className="hint">
         El código del productor es el SPE/CAN registrado en su ficha. Si deja
         este campo vacío, se usa ese código; cuando no esté registrado, se usa
-        el código de exportación disponible. El origen se toma del productor.
+        el código de exportación disponible. AGN identifica al productor dentro
+        de Agronorte. El origen se toma del productor; verifique el departamento
+        de cada procedencia antes de reemplazarlo.
       </p>
       <label className="check-row">
         <input
           type="checkbox"
           name="senave_program"
           defaultChecked={value?.senave_program ?? false}
+          onChange={(event) =>
+            updateField("senave_program", event.target.checked)
+          }
         />
         Lote incluido en el programa SENAVE para Uruguay
       </label>

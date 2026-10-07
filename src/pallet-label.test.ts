@@ -16,6 +16,7 @@ import {
   palletLabelImporterRows,
   palletLabelProducerIdentity,
   palletLabelRows,
+  palletLabelReview,
   SENAVE_DECLARATION,
 } from "./services/pallet-label-data";
 import {
@@ -89,6 +90,246 @@ function harvestReference(
 }
 
 describe("datos de la etiqueta de exportación", () => {
+  it("revisa todos los datos de Uruguay sin inventar valores ni restar otra vez los 42 kg de tara", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      internal_code: "AGN-0001",
+      trap_reference_codes: ["SPE-PRUEBA-001-SAN"],
+      export_origin: "Depto. de San Pedro – Paraguay",
+    };
+    pallet.tare_kg = 42;
+    pallet.gross_kg = 432;
+    pallet.metadata = {
+      export_label: {
+        afidi: "1571652",
+        harvest_date: "2026-09-29",
+        packaged_date: "2026-10-01",
+        senave_program: true,
+        importer_name: "IMPORTADOR DE PRUEBA",
+        importer_address: "DIRECCIÓN DE PRUEBA, URUGUAY",
+      },
+    };
+    const before = structuredClone(data);
+    const label = palletLabelData(data, pallet);
+    expect(palletLabelReview(data, pallet)).toEqual({
+      pending: [],
+      warnings: [],
+    });
+    expect(palletLabelRows(label)).toContainEqual({
+      title: "PESO NETO (kg)",
+      value: "390",
+    });
+    const markup = labelMarkup(data, pallet);
+    expect(markup).toContain("Campos de la etiqueta informados");
+    expect(markup).toContain("SPE-PRUEBA-001-SAN");
+    expect(markup).toContain("1571652");
+    expect(markup).toContain("29/09/2026");
+    expect(markup).toContain("01/10/2026");
+    expect(markup).not.toContain(pallet.token);
+    expect(data).toEqual(before);
+  });
+
+  it("identifica campos pendientes de Uruguay antes de imprimir manteniendo los datos conocidos", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = { internal_code: "AGN-0001" };
+    const review = palletLabelReview(data, pallet);
+    expect(review.pending).toEqual([
+      "Código del productor (SPE/CAN)",
+      "Origen",
+      "Fecha de cosecha",
+      "Fecha de envasado",
+      "N° de AFIDI",
+      "Importador",
+      "Dirección del importador",
+    ]);
+    expect(review.warnings).toEqual([]);
+    expect(palletLabelData(data, pallet).netKg).toBe(390);
+    expect(labelMarkup(data, pallet)).toContain("Datos por completar: 7");
+  });
+
+  it("mantiene visibles importador y dirección pendientes solo en el modelo SENAVE para Uruguay", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = { export_label: { senave_program: true } };
+    expect(palletLabelImporterRows(palletLabelData(data, pallet))).toEqual([
+      { title: "IMPORTADOR", value: "No informado", name: true },
+      { title: "DIRECCIÓN", value: "No informada", name: false },
+    ]);
+    expect(labelMarkup(data, pallet)).toContain('aria-label="Importador"');
+    pallet.destination = "Paraguay";
+    expect(palletLabelReview(data, pallet).warnings).toContain(
+      "La declaración SENAVE para Uruguay requiere destino Uruguay confirmado.",
+    );
+    expect(palletLabelImporterRows(palletLabelData(data, pallet))).toEqual([]);
+    expect(palletLabelReview(data, pallet).pending).not.toContain("Importador");
+    expect(palletLabelReview(data, pallet).pending).not.toContain(
+      "N° de AFIDI",
+    );
+    pallet.destination = "Uruguay";
+    pallet.metadata.export_label!.senave_program = false;
+    expect(palletLabelImporterRows(palletLabelData(data, pallet))).toEqual([]);
+  });
+
+  it("avisa cuando un código explícito es solo AGN sin borrar la corrección guardada", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = { export_label: { producer_code: "AGN-0001" } };
+    const review = palletLabelReview(data, pallet);
+    expect(review.pending).toContain("Código del productor (SPE/CAN)");
+    expect(review.warnings).toContain(
+      "El código AGN es interno. Revise la referencia SPE/CAN del productor para esta etiqueta.",
+    );
+    expect(pallet.metadata.export_label!.producer_code).toBe("AGN-0001");
+  });
+
+  it("detecta procedencias parcialmente incompletas aunque otra procedencia tenga código y origen", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      trap_reference_codes: ["SPE-PRUEBA-001-SAN"],
+      export_origin: "San Pedro",
+    };
+    const producer = {
+      ...data.producers[0],
+      ...base(pallet.organization_id),
+      name: "Segunda procedencia",
+      metadata: {},
+    };
+    const lot = {
+      ...data.field_lots[0],
+      ...base(pallet.organization_id),
+      producer_id: producer.id,
+      plot_id: null,
+    };
+    const reception = {
+      ...data.receptions[0],
+      ...base(pallet.organization_id),
+      lot_id: lot.id,
+    };
+    data.producers.push(producer);
+    data.field_lots.push(lot);
+    data.receptions.push(reception);
+    data.pallet_items.push({
+      ...base(pallet.organization_id),
+      pallet_id: pallet.id,
+      reception_id: reception.id,
+      kg: 100,
+    });
+    expect(palletLabelData(data, pallet).producerCode).toBe(
+      "SPE-PRUEBA-001-SAN",
+    );
+    expect(palletLabelReview(data, pallet).pending).toContain(
+      "Código del productor (SPE/CAN)",
+    );
+    expect(palletLabelReview(data, pallet).pending).toContain("Origen");
+    pallet.metadata = {
+      export_label: {
+        producer_code: "CÓDIGO CONFIRMADO PARA EL PALLET",
+        origin: "Origen confirmado",
+      },
+    };
+    expect(palletLabelReview(data, pallet).pending).not.toContain(
+      "Código del productor (SPE/CAN)",
+    );
+    expect(palletLabelReview(data, pallet).pending).not.toContain("Origen");
+  });
+
+  it("no imprime fechas imposibles guardadas ni reemplaza una fecha explícita inválida por una estimación", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: {
+        harvest_date: "2026-02-30",
+        packaged_date: "fecha inválida",
+      },
+    };
+    expect(palletLabelData(data, pallet)).toMatchObject({
+      harvest: "No informada",
+      packaged: "No informada",
+    });
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelReview(data, pallet).warnings).toEqual([
+      "La fecha de cosecha registrada no es válida; no se imprime. Corríjala con una fecha confirmada.",
+      "La fecha de envasado registrada no es válida; no se imprime. Corríjala con una fecha confirmada.",
+    ]);
+    expect(pallet.metadata.export_label!.harvest_date).toBe("2026-02-30");
+    pallet.metadata.export_label!.harvest_date = null;
+    data.field_lots[0].harvest_date = "2026-02-30";
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+  });
+
+  it("avisa sobre cosecha posterior a recepción y envasado anterior a cosecha sin reescribir el historial", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: { harvest_date: "2026-10-02", packaged_date: "2026-10-01" },
+    };
+    expect(palletLabelReview(data, pallet).warnings).toEqual([
+      "La cosecha es posterior a una recepción de este pallet. Revise las fechas confirmadas.",
+      "El envasado es anterior a la cosecha. Revise las fechas confirmadas.",
+    ]);
+    expect(palletLabelData(data, pallet).harvest).toBe("02/10/2026");
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-10-02");
+  });
+
+  it("mantiene cosecha 02/10 y recepción 01/10 reconfirmadas con aviso y todos los datos del pallet intactos", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata = {
+      internal_code: "AGN-0001",
+      trap_reference_codes: ["SPE-PRUEBA-001-SAN"],
+      export_origin: "Depto. de San Pedro – Paraguay",
+      harvest_reference: harvestReference("2026-10-02"),
+    };
+    data.field_lots[0].harvest_date = "2026-10-02";
+    data.receptions[0].date = "2026-10-01";
+    pallet.tare_kg = 42;
+    pallet.gross_kg = 432;
+    pallet.metadata = {
+      export_label: {
+        afidi: "1571652",
+        harvest_date: "2026-10-02",
+        packaged_date: "2026-10-07",
+        senave_program: true,
+        importer_name: "IMPORTADOR DE PRUEBA",
+        importer_address: "DIRECCIÓN DE PRUEBA, URUGUAY",
+      },
+    };
+    const before = structuredClone(data);
+    expect(palletLabelData(data, pallet)).toMatchObject({
+      harvest: "02/10/2026",
+      reception: "01/10/2026",
+      packaged: "07/10/2026",
+      afidi: "1571652",
+      netKg: 390,
+      code: pallet.code,
+      destination: "Uruguay",
+    });
+    expect(palletLabelReview(data, pallet)).toEqual({
+      pending: [],
+      warnings: [
+        "La cosecha es posterior a una recepción de este pallet. Revise las fechas confirmadas.",
+      ],
+    });
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-10-02");
+    expect(data).toEqual(before);
+    pallet.metadata.export_label!.harvest_date = null;
+    expect(palletLabelData(data, pallet).harvest).toBe("02/10/2026");
+    expect(palletLabelReview(data, pallet).warnings).toContain(
+      "La cosecha es posterior a una recepción de este pallet. Revise las fechas confirmadas.",
+    );
+  });
+
+  it("señala una referencia de cosecha pendiente y no la imprime ni la prellena", () => {
+    const { data, pallet } = fixture();
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = {
+      harvest_reference: harvestReference(
+        "2026-10-02",
+        "Pendiente de confirmar",
+      ),
+    };
+    expect(palletLabelReview(data, pallet).warnings).toContain(
+      "Hay una referencia de cosecha pendiente o incompatible con la recepción; no se usa en la etiqueta.",
+    );
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+  });
   it("mantiene AGN como identificación interna cuando un código de exportación legado solo contiene AGN", () => {
     for (const exportCode of [" AGN-0001 ", "agn-0001 / AGN-0002"]) {
       const { data, pallet } = fixture();
@@ -778,6 +1019,24 @@ describe("PDF A4 horizontal del pallet", () => {
     expect(pdfText(pdf)).not.toContain("IMPORTADOR");
     expect(labelImporterPrintLayout(label).rows).toEqual([]);
     expect(pdf.getNumberOfPages()).toBe(1);
+  });
+
+  it("muestra importador pendiente en SENAVE sin bloquear el PDF ni añadir otra página", () => {
+    const { data, pallet } = fixture();
+    pallet.metadata = {
+      export_label: { senave_program: true, afidi: "1571652" },
+    };
+    const pdf = createPalletLabelPdf(palletLabelData(data, pallet), assets);
+    const contents = pdfText(pdf);
+    expect(contents).toContain("IMPORTADOR");
+    expect(contents).toContain("No informado");
+    expect(contents).toContain("No informada");
+    expect(contents).toContain("1571652");
+    expect(contents).toContain("PAL-TEST-390");
+    expect(contents).toContain("Anastrepha grandis");
+    expect(pdf.getNumberOfPages()).toBe(1);
+    expect(pdf.internal.pageSize.getWidth()).toBeCloseTo(297, 1);
+    expect(pdf.internal.pageSize.getHeight()).toBeCloseTo(210, 1);
   });
 
   it("limita la letra de campos de texto para impresión y ajusta un origen de 200 caracteres a dos líneas", () => {

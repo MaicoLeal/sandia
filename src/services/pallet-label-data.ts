@@ -51,7 +51,10 @@ const sourceHarvestDate = (
   source: ReturnType<typeof origin>,
   allowProducerReference: boolean,
 ) => {
-  if (source.lot?.harvest_date) return source.lot.harvest_date;
+  if (source.lot?.harvest_date)
+    return validIsoDate(source.lot.harvest_date)
+      ? source.lot.harvest_date
+      : null;
   if (!allowProducerReference) return null;
   const reference = source.producer?.metadata?.harvest_reference;
   const receptionDate = source.reception?.date;
@@ -94,11 +97,13 @@ export function palletLabelEditValues(
     origin:
       fields?.origin?.trim() ||
       join(sources.map((source) => source.producer?.metadata?.export_origin)),
-    harvest_date:
-      fields?.harvest_date ||
-      (harvestDates.length === 1 && sourceDates.every(Boolean)
+    harvest_date: fields?.harvest_date
+      ? validIsoDate(fields.harvest_date)
+        ? fields.harvest_date
+        : null
+      : harvestDates.length === 1 && sourceDates.every(Boolean)
         ? harvestDates[0]
-        : null),
+        : null,
   };
 }
 export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
@@ -107,7 +112,7 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
     .map((item) => origin(data, item.reception_id));
   const fields = pallet.metadata?.export_label;
   const harvestDates = fields?.harvest_date
-    ? [fields.harvest_date]
+    ? [validIsoDate(fields.harvest_date) ? fields.harvest_date : null]
     : harvestDatesForSources(data, pallet, sources);
   return {
     code: pallet.code,
@@ -129,7 +134,7 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
       harvestDates.length > 0 && harvestDates.every(Boolean)
         ? join(harvestDates.map((date) => dateLabel(date!)))
         : "No informada",
-    packaged: fields?.packaged_date
+    packaged: validIsoDate(fields?.packaged_date)
       ? dateLabel(fields.packaged_date)
       : "No informada",
     afidi: fields?.afidi?.trim() || "No informado",
@@ -138,20 +143,151 @@ export function palletLabelData(data: Data, pallet: Pallet): PalletLabelData {
       join(
         sources
           .map((source) => source.reception?.date)
-          .filter(Boolean)
+          .filter(validIsoDate)
           .map((date) => dateLabel(date!)),
       ) || "No informada",
-    destination: pallet.destination,
-    responsible: pallet.responsible,
+    destination: pallet.destination.trim() || "No informado",
+    responsible: pallet.responsible.trim() || "No informado",
     senaveProgram: fields?.senave_program === true,
     importerName: fields?.importer_name?.trim() || "",
     importerAddress: fields?.importer_address?.trim() || "",
   };
 }
+export interface PalletLabelReview {
+  pending: string[];
+  warnings: string[];
+}
+export function palletLabelReview(
+  data: Data,
+  pallet: Pallet,
+): PalletLabelReview {
+  const label = palletLabelData(data, pallet);
+  const fields = pallet.metadata?.export_label;
+  const sources = data.pallet_items
+    .filter((item) => item.pallet_id === pallet.id)
+    .map((item) => origin(data, item.reception_id));
+  const missing = (value: string) =>
+    !value.trim() ||
+    /^(no informad[oa]|pendiente(?: de .*)?)$/i.test(value.trim());
+  const pending = new Set<string>();
+  const warnings = new Set<string>();
+  if (missing(label.code)) pending.add("Código del pallet");
+  if (!sources.length || sources.some((source) => !source.producer))
+    pending.add("Productor / procedencia");
+  if (
+    missing(label.producerCode) ||
+    internalProducerCode.test(label.producerCode) ||
+    (!fields?.producer_code?.trim() &&
+      sources.some((source) => !producerReferenceCodes([source])))
+  )
+    pending.add("Código del productor (SPE/CAN)");
+  if (
+    missing(label.origin) ||
+    (!fields?.origin?.trim() &&
+      sources.some(
+        (source) => !source.producer?.metadata?.export_origin?.trim(),
+      ))
+  )
+    pending.add("Origen");
+  if (!Number.isFinite(label.netKg) || label.netKg <= 0)
+    pending.add("Peso neto");
+  if (missing(label.harvest)) pending.add("Fecha de cosecha");
+  if (missing(label.packaged)) pending.add("Fecha de envasado");
+  if (!sources.length || sources.some((source) => !source.lot?.code?.trim()))
+    pending.add("Lote");
+  if (
+    !sources.length ||
+    sources.some((source) => !validIsoDate(source.reception?.date))
+  )
+    pending.add("Fecha de recepción");
+  if (missing(label.destination)) pending.add("Destino");
+  if (missing(label.responsible)) pending.add("Responsable");
+  if (label.destination.trim().toLocaleLowerCase("es") === "uruguay") {
+    if (missing(label.afidi)) pending.add("N° de AFIDI");
+    if (!label.importerName) pending.add("Importador");
+    if (!label.importerAddress) pending.add("Dirección del importador");
+  }
+  if (internalProducerCode.test(label.producerCode))
+    warnings.add(
+      "El código AGN es interno. Revise la referencia SPE/CAN del productor para esta etiqueta.",
+    );
+  if (
+    label.senaveProgram &&
+    label.destination.trim().toLocaleLowerCase("es") !== "uruguay"
+  )
+    warnings.add(
+      "La declaración SENAVE para Uruguay requiere destino Uruguay confirmado.",
+    );
+  if (
+    (fields?.harvest_date && !validIsoDate(fields.harvest_date)) ||
+    (!fields?.harvest_date &&
+      sources.some(
+        (source) =>
+          source.lot?.harvest_date && !validIsoDate(source.lot.harvest_date),
+      ))
+  )
+    warnings.add(
+      "La fecha de cosecha registrada no es válida; no se imprime. Corríjala con una fecha confirmada.",
+    );
+  if (fields?.packaged_date && !validIsoDate(fields.packaged_date))
+    warnings.add(
+      "La fecha de envasado registrada no es válida; no se imprime. Corríjala con una fecha confirmada.",
+    );
+  const harvestDates = fields?.harvest_date
+    ? [validIsoDate(fields.harvest_date) ? fields.harvest_date : null]
+    : harvestDatesForSources(data, pallet, sources);
+  const receptions = sources.map((source) => source.reception?.date);
+  if (
+    harvestDates.some((harvest, index) => {
+      const reception = receptions[fields?.harvest_date ? 0 : index];
+      return harvest && validIsoDate(reception) && harvest > reception;
+    }) ||
+    (validIsoDate(fields?.harvest_date) &&
+      receptions.some(
+        (reception) =>
+          validIsoDate(reception) && fields.harvest_date! > reception,
+      ))
+  )
+    warnings.add(
+      "La cosecha es posterior a una recepción de este pallet. Revise las fechas confirmadas.",
+    );
+  if (
+    validIsoDate(fields?.packaged_date) &&
+    harvestDates.some((harvest) => harvest && fields.packaged_date! < harvest)
+  )
+    warnings.add(
+      "El envasado es anterior a la cosecha. Revise las fechas confirmadas.",
+    );
+  if (
+    !fields?.harvest_date &&
+    sources.some(
+      (source, index) =>
+        !source.lot?.harvest_date &&
+        !harvestDates[index] &&
+        source.producer?.metadata?.harvest_reference,
+    )
+  )
+    warnings.add(
+      "Hay una referencia de cosecha pendiente o incompatible con la recepción; no se usa en la etiqueta.",
+    );
+  return { pending: [...pending], warnings: [...warnings] };
+}
 export function palletLabelImporterRows(label: PalletLabelData) {
+  const showPending =
+    label.senaveProgram &&
+    label.destination.trim().toLocaleLowerCase("es") === "uruguay";
   return [
-    { title: "IMPORTADOR", value: label.importerName.trim(), name: true },
-    { title: "DIRECCIÓN", value: label.importerAddress.trim(), name: false },
+    {
+      title: "IMPORTADOR",
+      value: label.importerName.trim() || (showPending ? "No informado" : ""),
+      name: true,
+    },
+    {
+      title: "DIRECCIÓN",
+      value:
+        label.importerAddress.trim() || (showPending ? "No informada" : ""),
+      name: false,
+    },
   ].filter((row) => row.value);
 }
 export function palletLabelProducerIdentity(label: PalletLabelData) {
@@ -173,7 +309,13 @@ export function palletLabelRows(label: PalletLabelData) {
     },
     { title: "ORIGEN", value: label.origin },
     { title: "CÓDIGO DEL PRODUCTOR", value: label.producerCode },
-    { title: "PESO NETO (kg)", value: kg(label.netKg) },
+    {
+      title: "PESO NETO (kg)",
+      value:
+        Number.isFinite(label.netKg) && label.netKg > 0
+          ? kg(label.netKg)
+          : "No informado",
+    },
     { title: "FECHA DE COSECHA", value: label.harvest },
     { title: "FECHA DE ENVASADO", value: label.packaged },
     { title: "N° DE AFIDI", value: label.afidi },

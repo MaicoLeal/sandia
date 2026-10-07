@@ -1,5 +1,7 @@
 # Novas recepções e etiquetas — 07/10/2026
 
+> Orientação histórica da versão 2026.10.07-7. A conexão exclusiva ao projeto Sandía e as novas confirmações do proprietário estão descritas em [REVISAO-ETIQUETAS-2026-10-07.md](REVISAO-ETIQUETAS-2026-10-07.md). Na versão 2026.10.07-8, Elias tem colheita 02/10/2026 e recepção 01/10/2026 reconfirmadas, preservadas com aviso de cronologia. Use as operações pontuais atuais; não reaplique o pacote antigo completo a uma base que já está atualizada.
+
 O proprietário informou novas recepções e autorizou atualizar os registros atuais com os códigos de produtor, datas de colheita confirmadas e AFIDI **1571652** para Uruguay. Confirmou **07/10/2026** como `Fecha de envasado` dos novos pallets. A operação pontual está em `supabase/operations/20261007_refresh_current_uruguay_labels.sql`.
 
 ## Escopo e dados utilizados
