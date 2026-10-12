@@ -62,6 +62,7 @@ import {
   round,
 } from "./domain";
 import { ReceptionForm } from "./ReceptionForm";
+import { ProducerRanking } from "./ProducerRanking";
 import { createReception } from "./reception-creation";
 import { LossFields } from "./LossFields";
 import { TrapInstallationsPanel } from "./TrapInstallationsPanel";
@@ -138,7 +139,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.12-16 · Etiqueta en una hoja A4";
+const appVersion = "2026.10.12-17 · Ranking de productores";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -1588,6 +1589,11 @@ function WorkspaceApp() {
                   <ArrowRight size={18} />
                 </button>
               </div>
+              <ProducerRanking
+                data={data}
+                today={today}
+                onSelectProducer={setSelectedProducer}
+              />
               <div className="dashboard-grid">
                 <section className="panel">
                   <div className="section-heading">
