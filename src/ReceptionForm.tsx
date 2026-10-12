@@ -104,12 +104,19 @@ export function ReceptionForm({
   }, [draftKey, resumeDraft]);
   useEffect(() => {
     if (!ready || choosingDraft || busy) return;
-    const timer = setTimeout(() => {
-      void saveDraft(draftKey, { ...values, pendingWeight: weight })
-        .then(() => setDraftStatus("Borrador guardado en este dispositivo"))
-        .catch(() => setError("No se pudo guardar el borrador."));
-    }, 250);
-    return () => clearTimeout(timer);
+    let active = true;
+    // Persist local input immediately: closing the modal must not cancel the
+    // last weight while a debounce is pending. IndexedDB orders these writes.
+    void saveDraft(draftKey, { ...values, pendingWeight: weight })
+      .then(() => {
+        if (active) setDraftStatus("Borrador guardado en este dispositivo");
+      })
+      .catch(() => {
+        if (active) setError("No se pudo guardar el borrador.");
+      });
+    return () => {
+      active = false;
+    };
   }, [draftKey, values, weight, ready, choosingDraft, busy]);
   const archive = async (draft: ReceptionDraft) => {
     if (!hasReceptionDraft(draft)) return;
