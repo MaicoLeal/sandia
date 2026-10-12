@@ -5,7 +5,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowRight,
@@ -42,9 +42,7 @@ import type {
   TrapInstallation,
 } from "./types";
 import {
-  intakeSelection,
   regionalLosses,
-  lossReasons,
   groupPalletsByProducer,
   assertClassification,
   assertPallet,
@@ -62,8 +60,9 @@ import {
   producerIdentity,
   receptionTotal,
   round,
-  summary,
 } from "./domain";
+import { ReceptionForm } from "./ReceptionForm";
+import { createReception } from "./reception-creation";
 import { LossFields } from "./LossFields";
 import { TrapInstallationsPanel } from "./TrapInstallationsPanel";
 import { PalletCorrection } from "./PalletCorrection";
@@ -99,9 +98,7 @@ import {
 import {
   clearDraft,
   getFile,
-  readDraft,
   readWorkspace,
-  saveDraft,
   saveFile,
 } from "./services/storage";
 import {
@@ -141,7 +138,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.07-13 · Datos de la carga en las etiquetas";
+const appVersion = "2026.10.12-14 · Nuevas entregas por productor";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -259,7 +256,6 @@ const nav = [
   { name: "Expedición", icon: Truck },
   { name: "Informes", icon: FileText },
 ] as const;
-const reasons = lossReasons;
 const text = (form: HTMLFormElement, key: string) =>
   String(new FormData(form).get(key) ?? "").trim();
 const number = (form: HTMLFormElement, key: string) => {
@@ -437,6 +433,7 @@ function WorkspaceApp() {
   );
   const [dialog, setDialog] = useState<Dialog>(null);
   const [returnToReception, setReturnToReception] = useState(false);
+  const [resumeReceptionDraft, setResumeReceptionDraft] = useState(false);
   const [selectedReception, setSelectedReception] = useState<string | null>(
     null,
   );
@@ -473,6 +470,7 @@ function WorkspaceApp() {
   );
   const [palletProducerId, setPalletProducerId] = useState("");
   const [palletSearch, setPalletSearch] = useState("");
+  const [palletReceptionId, setPalletReceptionId] = useState("");
   const close = useCallback(() => {
     setDialog(null);
     setEditingProducerId(null);
@@ -480,6 +478,7 @@ function WorkspaceApp() {
     setEditingReceptionRevision(null);
     setEditingReceptionMode("weights");
     setReturnToReception(false);
+    setResumeReceptionDraft(false);
     setLabel(null);
     setEditingPalletId(null);
     setEditingPalletRevision(null);
@@ -502,6 +501,7 @@ function WorkspaceApp() {
       setSelectedProducer(null);
       setRecipientAccessOpen(false);
       setPalletProducerId("");
+      setPalletReceptionId("");
       setPalletSearch("");
       setShowCancelledPallets(false);
       setShowCancelledReceptions(false);
@@ -558,6 +558,13 @@ function WorkspaceApp() {
   const palletProducer = data.producers.find(
     (p) => p.id === activePalletProducerId,
   );
+  const producerPalletReceptions = data.receptions
+    .filter((r) => origin(data, r.id).producer?.id === activePalletProducerId)
+    .sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) ||
+        b.created_at.localeCompare(a.created_at),
+    );
   const visiblePallets = palletToken
     ? data.pallets.filter((p) => p.token === palletToken)
     : data.pallets;
@@ -570,6 +577,15 @@ function WorkspaceApp() {
     if (
       !activePalletProducerId ||
       !origins.some((o) => o.producer?.id === activePalletProducerId)
+    )
+      return false;
+    if (
+      palletReceptionId &&
+      !palletToken &&
+      !data.pallet_items.some(
+        (item) =>
+          item.pallet_id === p.id && item.reception_id === palletReceptionId,
+      )
     )
       return false;
     return [
@@ -651,12 +667,18 @@ function WorkspaceApp() {
       );
     }
   };
-  const rows = data.receptions.filter((r) => {
-    const o = origin(data, r.id);
-    return `${o.producer?.name} ${o.lot?.code} ${r.date}`
-      .toLowerCase()
-      .includes(search.toLowerCase());
-  });
+  const rows = [...data.receptions]
+    .sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) ||
+        b.created_at.localeCompare(a.created_at),
+    )
+    .filter((r) => {
+      const o = origin(data, r.id);
+      return `${o.producer?.name} ${o.lot?.code} ${r.date}`
+        .toLowerCase()
+        .includes(search.toLowerCase());
+    });
   const today = day();
   const weekStart = new Date(today + "T12:00:00-03:00");
   weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
@@ -692,6 +714,10 @@ function WorkspaceApp() {
         setError("");
         setEditingProducerId(null);
         setEditingReceptionId(null);
+        if (type === "reception") {
+          setResumeReceptionDraft(false);
+          setSelectedReception(null);
+        }
         setDialog(type);
       }}
     >
@@ -1800,6 +1826,7 @@ function WorkspaceApp() {
                     value={activePalletProducerId}
                     onChange={(e) => {
                       setPalletProducerId(e.target.value);
+                      setPalletReceptionId("");
                       setPalletToken(null);
                       setPalletSearch("");
                     }}
@@ -1812,6 +1839,24 @@ function WorkspaceApp() {
                           {producerIdentity(producer)}
                         </option>
                       ))}
+                  </select>
+                </Field>
+                <Field label="Entrega / recepción">
+                  <select
+                    value={palletToken ? "" : palletReceptionId}
+                    disabled={!activePalletProducerId || Boolean(palletToken)}
+                    onChange={(event) =>
+                      setPalletReceptionId(event.target.value)
+                    }
+                  >
+                    <option value="">Todas las entregas</option>
+                    {producerPalletReceptions.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {dateLabel(r.date)} · {origin(data, r.id).lot?.code} ·{" "}
+                        {kg(receptionTotal(data, r.id))} kg
+                        {r.status === "Cancelado" ? " · Cancelada" : ""}
+                      </option>
+                    ))}
                   </select>
                 </Field>
                 <Field label="Buscar pallet, lote o peso">
@@ -1846,6 +1891,7 @@ function WorkspaceApp() {
                     className="button secondary"
                     onClick={() => {
                       setPalletProducerId(activePalletProducerId);
+                      setPalletReceptionId("");
                       setPalletToken(null);
                       setPalletSearch("");
                     }}
@@ -2306,6 +2352,7 @@ function WorkspaceApp() {
                 }).then((saved) => {
                   if (saved && returnToReception) {
                     setReturnToReception(false);
+                    setResumeReceptionDraft(true);
                     setDialog("reception");
                   }
                 });
@@ -2469,6 +2516,7 @@ function WorkspaceApp() {
                 }).then((saved) => {
                   if (saved && returnToReception) {
                     setReturnToReception(false);
+                    setResumeReceptionDraft(true);
                     setDialog("reception");
                   }
                 });
@@ -2518,6 +2566,8 @@ function WorkspaceApp() {
           {dialog === "reception" && (
             <ReceptionForm
               data={data}
+              organizationId={org}
+              resumeDraft={resumeReceptionDraft}
               busy={busy}
               draftKey={
                 draftKey + (selectedProducer ? ":" + selectedProducer : "")
@@ -2532,154 +2582,33 @@ function WorkspaceApp() {
                 setDialog(type);
               }}
               onSave={async (values) => {
-                await run(async () => {
+                let createdId = "";
+                const saved = await run(async () => {
                   allowed("receive");
+                  if (values.classifyNow) allowed("classify");
                   await commit((d) => {
-                    const selection = values.classifyNow
-                      ? intakeSelection(
-                          summary(values.weights).total,
-                          values.rejectedKg,
-                          values.rejectionReason,
-                        )
-                      : null;
-                    if (selection) allowed("classify");
-                    const plot = d.plots.find((p) => p.id === values.plotId);
-                    const selected = d.producers.find(
-                      (p) =>
-                        p.id === values.producerId && p.status === "Activo",
-                    );
-                    if (!selected)
-                      throw new Error("Seleccione un productor activo.");
-                    if (values.plotId && !plot)
-                      throw new Error("Seleccione una parcela válida.");
-                    if (
-                      plot &&
-                      d.farms.find((f) => f.id === plot.farm_id)
-                        ?.producer_id !== selected.id
-                    )
-                      throw new Error("La parcela pertenece a otro productor.");
-                    let lot = d.field_lots.find((l) => l.id === values.lotId);
-                    if (
-                      lot &&
-                      ((lot.plot_id !== null &&
-                        lot.plot_id !== values.plotId) ||
-                        (lot.producer_id && lot.producer_id !== selected.id))
-                    )
-                      throw new Error("El lote pertenece a otro origen.");
-                    if (lot && ["Expedido", "Rechazado"].includes(lot.status))
-                      throw new Error("El lote está cerrado.");
-                    if (!lot) {
-                      if (
-                        values.lotCode.trim() &&
-                        d.field_lots.some(
-                          (l) => l.code === values.lotCode.trim(),
-                        )
-                      )
-                        throw new Error("Ya existe un lote con este código.");
-                      lot = {
-                        ...base(org, "En recepción", user),
-                        plot_id: plot?.id ?? null,
-                        producer_id: selected.id,
-                        code: values.lotCode.trim() || code("SAN"),
-                        crop: "Sandía",
-                        variety: plot?.variety ?? "",
-                        harvest_date: values.harvest || null,
-                        notes: "",
-                      };
-                      d.field_lots.push(lot);
-                      record(d, "field_lots", lot.id, "Lote creado", null, lot);
-                    }
-                    const r = {
-                      ...base(org, "Confirmado", user),
-                      lot_id: lot.id,
-                      date: values.date,
-                      responsible: values.responsible,
-                      notes: values.notes,
-                    };
-                    d.receptions.push(r);
-                    values.weights.forEach((weight, i) =>
-                      d.reception_weights.push({
-                        ...base(org, "Activo", user),
-                        reception_id: r.id,
-                        sequence: i + 1,
-                        kg: weight,
-                        operator: values.responsible,
-                        notes: "",
-                        correction_reason: "",
-                      }),
-                    );
-                    if (selection) {
-                      const classification = {
-                        ...base(org, "Activo", user),
-                        reception_id: r.id,
-                        approved_kg: selection.approved,
-                        rejected_kg: selection.rejected,
-                        approved_count: null,
-                        rejected_count: null,
-                        reason:
-                          selection.rejected > 0 ? values.rejectionReason : "",
-                        size: "",
-                        quality: null,
-                        notes: "Selección registrada al recibir la carga.",
-                        region:
-                          values.region ||
-                          selected.community ||
-                          plot?.location ||
-                          "",
-                        pest_observation: values.pestObservation,
-                        symptoms: values.symptoms,
-                      };
-                      d.classifications.push(classification);
-                      lot.status =
-                        selection.approved === 0
-                          ? "Rechazado"
-                          : selection.rejected > 0
-                            ? "Parcialmente rechazado"
-                            : "En pesaje";
-                      record(
-                        d,
-                        "classifications",
-                        classification.id,
-                        "Clasificación registrada",
-                        null,
-                        classification,
-                      );
-                    }
-                    for (const photo of values.photos ?? []) {
-                      const attachment = {
-                        ...base(org, "Activo", user),
-                        id: photo.id,
-                        entity_type: "receptions" as const,
-                        entity_id: r.id,
-                        name: photo.name,
-                        mime: photo.mime,
-                        size: photo.size,
-                        storage_path:
-                          org +
-                          "/" +
-                          photo.id +
-                          "/" +
-                          photo.name.replace(/[^a-zA-Z0-9._-]/g, "_"),
-                      };
-                      d.attachments.push(attachment);
-                      record(
-                        d,
-                        "attachments",
-                        attachment.id,
-                        "Adjunto agregado",
-                        null,
-                        { name: photo.name },
-                      );
-                    }
-                    record(d, "receptions", r.id, "Recepción creada", null, {
-                      ...r,
-                      total_kg: summary(values.weights).total,
-                    });
+                    createdId = createReception(d, values, {
+                      organizationId: org,
+                      userId: user,
+                      actor,
+                    }).id;
                   });
-                  await clearDraft(
-                    draftKey + (selectedProducer ? ":" + selectedProducer : ""),
-                  );
-                });
+                }, "Nueva recepción guardada en el historial del productor.");
+                if (saved) {
+                  setSelectedProducer(null);
+                  setSelectedReception(createdId);
+                  setPage("Recepción");
+                  try {
+                    await clearDraft(
+                      draftKey +
+                        (selectedProducer ? ":" + selectedProducer : ""),
+                    );
+                  } catch {
+                    setError(
+                      "La recepción ya se guardó. No vuelva a enviarla: no se pudo retirar el borrador de este dispositivo.",
+                    );
+                  }
+                }
               }}
             />
           )}
@@ -2820,10 +2749,16 @@ function WorkspaceApp() {
                   <option value="">Seleccione</option>
                   {data.receptions
                     .filter((r) => r.status !== "Cancelado")
+                    .sort(
+                      (a, b) =>
+                        b.date.localeCompare(a.date) ||
+                        b.created_at.localeCompare(a.created_at),
+                    )
                     .map((r) => (
                       <option value={r.id} key={r.id}>
                         {origin(data, r.id).producer?.name} ·{" "}
-                        {origin(data, r.id).lot?.code}
+                        {dateLabel(r.date)} · {origin(data, r.id).lot?.code} ·{" "}
+                        {kg(receptionTotal(data, r.id))} kg
                       </option>
                     ))}
                 </select>
@@ -2940,7 +2875,12 @@ function WorkspaceApp() {
               exportFieldsEnabled={exportFieldsEnabled}
               importerFieldsEnabled={importerFieldsEnabled}
               tareEnabled={palletTareEnabled}
-              selectedReception={selectedReception}
+              selectedReception={
+                selectedReception ?? (palletReceptionId || null)
+              }
+              initialProducerId={
+                activePalletProducerId || selectedProducer || ""
+              }
               onSave={async (form) => {
                 await run(async () => {
                   allowed("pallet");
@@ -2984,6 +2924,7 @@ function WorkspaceApp() {
                           ? {
                               metadata: {
                                 export_label: exportFields,
+                                harvest_source: "reception_lot" as const,
                               },
                             }
                           : {}),
@@ -3591,6 +3532,20 @@ function WorkspaceApp() {
           </div>
           {detail.reception.status !== "Cancelado" && (
             <>
+              {can(role, "receive") && detail.producer && (
+                <button
+                  className="button secondary full"
+                  disabled={busy}
+                  onClick={() => {
+                    setSelectedProducer(detail.producer!.id);
+                    setSelectedReception(null);
+                    setResumeReceptionDraft(false);
+                    setDialog("reception");
+                  }}
+                >
+                  <Plus size={18} /> Nueva entrega de este productor
+                </button>
+              )}
               {can(role, "correct") && (
                 <div className="producer-actions">
                   <button
@@ -3625,7 +3580,12 @@ function WorkspaceApp() {
                     "classification",
                     "classify",
                   )}
-                {newButton("Pallet", "pallet", "pallet", <Box size={16} />)}
+                {newButton(
+                  "Crear pallets de esta entrega",
+                  "pallet",
+                  "pallet",
+                  <Box size={16} />,
+                )}
               </div>
             </>
           )}
@@ -3872,7 +3832,11 @@ function WorkspaceApp() {
             {can(role, "receive") && (
               <button
                 className="button secondary full"
-                onClick={() => setDialog("reception")}
+                onClick={() => {
+                  setSelectedReception(null);
+                  setResumeReceptionDraft(false);
+                  setDialog("reception");
+                }}
               >
                 Nueva recepción de este productor
               </button>
@@ -3945,6 +3909,7 @@ function WorkspaceApp() {
             className="button secondary full"
             onClick={() => {
               setPalletProducerId(producer.id);
+              setPalletReceptionId("");
               setPalletSearch("");
               setPalletToken(null);
               setSelectedProducer(null);
@@ -4072,485 +4037,12 @@ function Timeline({ log }: { log: AuditLog }) {
     </div>
   );
 }
-interface DraftPhoto {
-  id: string;
-  name: string;
-  mime: string;
-  size: number;
-}
-interface ReceptionValues {
-  producerId: string;
-  plotId: string;
-  lotId: string;
-  lotCode: string;
-  date: string;
-  harvest: string;
-  responsible: string;
-  notes: string;
-  weights: number[];
-  classifyNow: boolean;
-  rejectedKg: string;
-  rejectionReason: string;
-  region: string;
-  pestObservation: string;
-  symptoms: string;
-  photos: DraftPhoto[];
-}
-function ReceptionForm({
-  data,
-  busy,
-  draftKey,
-  actor,
-  allowSelection,
-  initialProducerId,
-  onSave,
-  onQuickCreate,
-}: {
-  data: Data;
-  busy: boolean;
-  draftKey: string;
-  actor: string;
-  allowSelection: boolean;
-  initialProducerId: string;
-  onSave: (values: ReceptionValues) => Promise<void>;
-  onQuickCreate: (type: "producer" | "plot") => void;
-}) {
-  const [values, setValues] = useState<ReceptionValues>({
-    producerId: initialProducerId,
-    plotId: "",
-    lotId: "",
-    lotCode: "",
-    date: day(),
-    harvest: "",
-    responsible: actor,
-    notes: "",
-    weights: [],
-    classifyNow: allowSelection,
-    rejectedKg: "0",
-    rejectionReason: "",
-    region: "",
-    pestObservation: "",
-    symptoms: "",
-    photos: [],
-  });
-  const weightRef = useRef<HTMLInputElement>(null);
-  const [weight, setWeight] = useState("");
-  const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
-  const [draftStatus, setDraftStatus] = useState("");
-  useEffect(() => {
-    let active = true;
-    void readDraft<ReceptionValues>(draftKey)
-      .then((draft) => {
-        if (active) {
-          if (draft) setValues((initial) => ({ ...initial, ...draft }));
-          setReady(true);
-        }
-      })
-      .catch(() => {
-        if (active) setError("No se pudo recuperar el borrador.");
-      });
-    return () => {
-      active = false;
-    };
-  }, [draftKey]);
-  useEffect(() => {
-    if (!ready) return;
-    const timer = setTimeout(() => {
-      void saveDraft(draftKey, values)
-        .then(() => setDraftStatus("Borrador guardado en este dispositivo"))
-        .catch(() => setError("No se pudo guardar el borrador."));
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [draftKey, values, ready]);
-  const set = <K extends keyof ReceptionValues>(
-    key: K,
-    value: ReceptionValues[K],
-  ) => setValues((v) => ({ ...v, [key]: value }));
-  const add = () => {
-    try {
-      set("weights", [...values.weights, parseKg(weight)]);
-      setWeight("");
-      setError("");
-      weightRef.current?.focus();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-  const s = summary(values.weights);
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (weight.trim()) {
-      setError("Agregue el peso pendiente con el botón + antes de guardar.");
-      return;
-    }
-    if (!values.weights.length) {
-      setError("Agregue al menos un pesaje.");
-      return;
-    }
-    try {
-      if (values.classifyNow)
-        intakeSelection(s.total, values.rejectedKg, values.rejectionReason);
-      void onSave(values);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-  return (
-    <form onSubmit={submit}>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <Field label="Productor *">
-        <select
-          required
-          value={values.producerId}
-          onChange={(e) =>
-            setValues((v) => ({
-              ...v,
-              producerId: e.target.value,
-              plotId: "",
-              lotId: "",
-            }))
-          }
-        >
-          <option value="">Seleccione un productor</option>
-          {data.producers
-            .filter((p) => p.status === "Activo")
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {producerIdentity(p)}
-              </option>
-            ))}
-        </select>
-      </Field>
-      <div className="row">
-        <button
-          type="button"
-          className="link"
-          disabled={busy || !ready}
-          onClick={() =>
-            void saveDraft(draftKey, values)
-              .then(() => onQuickCreate("producer"))
-              .catch(() => setError("No se pudo guardar el borrador."))
-          }
-        >
-          <Plus size={14} />
-          Nuevo productor
-        </button>
-        <button
-          type="button"
-          className="link"
-          disabled={busy || !ready}
-          onClick={() =>
-            void saveDraft(draftKey, values)
-              .then(() => onQuickCreate("plot"))
-              .catch(() => setError("No se pudo guardar el borrador."))
-          }
-        >
-          <Plus size={14} />
-          Nueva parcela
-        </button>
-      </div>
-      <Field label="Parcela (si se conoce)">
-        <select
-          value={values.plotId}
-          onChange={(e) =>
-            setValues((v) => ({ ...v, plotId: e.target.value, lotId: "" }))
-          }
-        >
-          <option value="">Parcela pendiente de informar</option>
-          {data.plots
-            .filter(
-              (p) =>
-                data.farms.find((f) => f.id === p.farm_id)?.producer_id ===
-                values.producerId,
-            )
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} · {data.farms.find((f) => f.id === p.farm_id)?.name}
-              </option>
-            ))}
-        </select>
-      </Field>
-      <Field label="Lote de campo">
-        <select
-          value={values.lotId}
-          onChange={(e) => set("lotId", e.target.value)}
-        >
-          <option value="">Crear un nuevo lote</option>
-          {data.field_lots
-            .filter(
-              (l) =>
-                (values.plotId
-                  ? l.plot_id === values.plotId
-                  : l.producer_id === values.producerId) &&
-                !["Expedido", "Rechazado"].includes(l.status),
-            )
-            .map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.code}
-              </option>
-            ))}
-        </select>
-      </Field>
-      {!values.lotId && (
-        <Field label="Código / nombre del lote">
-          <input
-            maxLength={80}
-            value={values.lotCode}
-            onChange={(e) => set("lotCode", e.target.value)}
-            placeholder="Automático si se deja vacío"
-          />
-        </Field>
-      )}
-      <div className="form-grid">
-        <Field label="Fecha de recepción *">
-          <input
-            type="date"
-            required
-            value={values.date}
-            onChange={(e) => set("date", e.target.value)}
-          />
-        </Field>
-        <Field label="Fecha de cosecha (si se conoce)">
-          <input
-            type="date"
-            value={values.harvest}
-            onChange={(e) => set("harvest", e.target.value)}
-          />
-        </Field>
-      </div>
-      <Field label="Responsable *">
-        <input
-          required
-          value={values.responsible}
-          onChange={(e) => set("responsible", e.target.value)}
-        />
-      </Field>
-      <div className="weigh-entry">
-        <Field label="Agregar peso (kg)">
-          <NumericInput
-            inputMode="decimal"
-            ref={weightRef}
-            enterKeyHint="next"
-            placeholder="0,00"
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                add();
-              }
-            }}
-          />
-        </Field>
-        <button
-          className="button primary"
-          type="button"
-          onClick={add}
-          aria-label="Agregar peso"
-        >
-          <Plus />
-        </button>
-      </div>
-      <div className="weight-chips">
-        {values.weights.map((w, i) => (
-          <span key={i}>
-            {kg(w)} kg
-            <button
-              type="button"
-              aria-label={"Quitar peso " + (i + 1) + " del borrador"}
-              onClick={() =>
-                set(
-                  "weights",
-                  values.weights.filter((_, n) => n !== i),
-                )
-              }
-            >
-              <X size={14} />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="weight-summary">
-        <div>
-          <small>Total recibido</small>
-          <strong>
-            {kg(s.total)} <span>kg</span>
-          </strong>
-        </div>
-        <p>
-          {s.count} pesajes · Promedio {kg(s.average)} kg
-          <br />
-          Mín. {kg(s.min)} kg · Máx. {kg(s.max)} kg
-        </p>
-      </div>
-      {allowSelection && (
-        <section className="intake-selection">
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={values.classifyNow}
-              onChange={(e) => set("classifyNow", e.target.checked)}
-            />
-            Registrar selección / pérdidas ahora
-          </label>
-          {values.classifyNow ? (
-            <>
-              <Field label="Pérdidas / rechazado (kg)">
-                <NumericInput
-                  inputMode="decimal"
-                  value={values.rejectedKg}
-                  onChange={(e) => set("rejectedKg", e.target.value)}
-                />
-              </Field>
-              {Number(values.rejectedKg.replace(",", ".")) > 0 && (
-                <Field label="Motivo de las pérdidas *">
-                  <select
-                    required
-                    value={values.rejectionReason}
-                    onChange={(e) => set("rejectionReason", e.target.value)}
-                  >
-                    <option value="">Seleccione el motivo</option>
-                    {reasons.map((reason) => (
-                      <option key={reason}>{reason}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-              <details className="loss-details">
-                <summary>Región y observaciones de campo (opcional)</summary>
-                <Field label="Región / comunidad">
-                  <input
-                    value={values.region}
-                    placeholder={
-                      data.producers.find((p) => p.id === values.producerId)
-                        ?.community || "Comunidad de origen"
-                    }
-                    onChange={(e) => set("region", e.target.value)}
-                    maxLength={160}
-                  />
-                </Field>
-                <Field label="Posible plaga observada">
-                  <input
-                    value={values.pestObservation}
-                    onChange={(e) => set("pestObservation", e.target.value)}
-                    placeholder="Nombre, si se conoce"
-                    maxLength={200}
-                  />
-                </Field>
-                <Field label="Señales observadas">
-                  <textarea
-                    value={values.symptoms}
-                    onChange={(e) => set("symptoms", e.target.value)}
-                    placeholder="Daño, manchas, insectos u otros signos"
-                    maxLength={2000}
-                  />
-                </Field>
-                <p className="hint">
-                  Registro para revisión técnica; no es un diagnóstico. Puede
-                  adjuntar una foto abajo.
-                </p>
-              </details>
-              <p className="hint">
-                Aprobado:{" "}
-                {kg(
-                  Math.max(
-                    0,
-                    round(
-                      s.total -
-                        (Number(values.rejectedKg.replace(",", ".")) || 0),
-                    ),
-                  ),
-                )}{" "}
-                kg · El total recibido incluye lo rechazado.
-              </p>
-            </>
-          ) : (
-            <p className="hint">
-              Puede continuar el pesaje y clasificar después.
-            </p>
-          )}
-        </section>
-      )}
-      <section className="intake-photos">
-        <label className="button secondary full">
-          Foto de la carga / pérdida (opcional)
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            disabled={busy || !ready}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              void (async () => {
-                try {
-                  if (
-                    !["image/jpeg", "image/png", "image/webp"].includes(
-                      file.type,
-                    ) ||
-                    !file.size ||
-                    file.size > 10 * 1024 * 1024
-                  )
-                    throw new Error("Use JPG, PNG o WEBP de hasta 10 MB.");
-                  const photo = {
-                    id: crypto.randomUUID(),
-                    name: file.name,
-                    mime: file.type,
-                    size: file.size,
-                  };
-                  await saveFile(photo.id, file);
-                  setValues((v) => ({
-                    ...v,
-                    photos: [...(v.photos ?? []), photo],
-                  }));
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              })();
-            }}
-          />
-        </label>
-        {values.photos?.map((photo) => (
-          <div className="draft-photo" key={photo.id}>
-            <DraftPhotoPreview photo={photo} />
-            <button
-              className="link"
-              type="button"
-              onClick={() =>
-                set(
-                  "photos",
-                  values.photos.filter((p) => p.id !== photo.id),
-                )
-              }
-            >
-              Quitar foto del borrador
-            </button>
-          </div>
-        ))}
-      </section>
-      <Field label="Observaciones">
-        <textarea
-          value={values.notes}
-          onChange={(e) => set("notes", e.target.value)}
-        />
-      </Field>
-      <p className="hint">{draftStatus || "Preparando borrador…"}</p>
-      <Submit disabled={busy || !ready}>Guardar recepción</Submit>
-    </form>
-  );
-}
 function PalletForm({
   data,
   actor,
   busy,
   selectedReception,
+  initialProducerId,
   exportFieldsEnabled,
   importerFieldsEnabled,
   tareEnabled,
@@ -4560,12 +4052,18 @@ function PalletForm({
   actor: string;
   busy: boolean;
   selectedReception: string | null;
+  initialProducerId: string;
   exportFieldsEnabled: boolean;
   importerFieldsEnabled: boolean;
   tareEnabled: boolean;
   onSave: (form: HTMLFormElement) => Promise<void>;
 }) {
   const [id, setId] = useState(selectedReception ?? "");
+  const [producerId, setProducerId] = useState(() =>
+    selectedReception
+      ? (origin(data, selectedReception).producer?.id ?? initialProducerId)
+      : initialProducerId,
+  );
   const [netWeight, setNetWeight] = useState("");
   const [destination, setDestination] = useState("Uruguay");
   const netNumber = /^\d+(?:[.,]\d{1,2})?$/.test(netWeight.trim())
@@ -4578,6 +4076,25 @@ function PalletForm({
         void onSave(e.currentTarget);
       }}
     >
+      <Field label="Productor de la entrega *">
+        <select
+          required
+          value={producerId}
+          onChange={(e) => {
+            setProducerId(e.target.value);
+            setId("");
+          }}
+        >
+          <option value="">Seleccione un productor</option>
+          {[...data.producers]
+            .sort((a, b) => a.name.localeCompare(b.name, "es"))
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {producerIdentity(p)}
+              </option>
+            ))}
+        </select>
+      </Field>
       <Field label="Recepción clasificada *">
         <select
           name="reception"
@@ -4587,11 +4104,21 @@ function PalletForm({
         >
           <option value="">Seleccione</option>
           {data.receptions
-            .filter((r) => available(data, r.id) > 0)
+            .filter(
+              (r) =>
+                r.status !== "Cancelado" &&
+                available(data, r.id) > 0 &&
+                origin(data, r.id).producer?.id === producerId,
+            )
+            .sort(
+              (a, b) =>
+                b.date.localeCompare(a.date) ||
+                b.created_at.localeCompare(a.created_at),
+            )
             .map((r) => (
               <option key={r.id} value={r.id}>
-                {origin(data, r.id).producer?.name} ·{" "}
-                {origin(data, r.id).lot?.code}
+                {dateLabel(r.date)} · {origin(data, r.id).lot?.code} ·{" "}
+                {kg(available(data, r.id))} kg disponibles
               </option>
             ))}
         </select>
@@ -4728,8 +4255,8 @@ function PalletCreationLabelFields({
         </p>
       )}
       <p className="hint">
-        Código, origen y cosecha corresponden a la recepción seleccionada.
-        Estos datos se guardan en todos los pallets que cree aquí.
+        Código, origen y cosecha corresponden a la recepción seleccionada. Estos
+        datos se guardan en todos los pallets que cree aquí.
       </p>
       <ExportLabelFields
         value={preset.value}
@@ -5296,29 +4823,6 @@ function Reports({
         como PDF” en el diálogo de impresión.
       </p>
     </section>
-  );
-}
-
-function DraftPhotoPreview({ photo }: { photo: DraftPhoto }) {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    let active = true;
-    let objectUrl = "";
-    void getFile(photo.id).then((file) => {
-      if (!file || !active) return;
-      objectUrl = URL.createObjectURL(file);
-      setUrl(objectUrl);
-    });
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [photo.id]);
-  return (
-    <>
-      {url && <img src={url} alt={photo.name} width={96} height={96} />}
-      <span>{photo.name}</span>
-    </>
   );
 }
 

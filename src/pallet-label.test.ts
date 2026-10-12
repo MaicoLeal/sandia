@@ -546,6 +546,57 @@ describe("datos de la etiqueta de exportación", () => {
     expect(data.receptions[0].date).toBe("2026-10-01");
   });
 
+  it("no imprime ni prellena la cosecha histórica del productor en un pallet de una nueva recepción", () => {
+    const { data, pallet } = fixture();
+    data.receptions[0].date = "2026-10-12";
+    data.field_lots[0].harvest_date = null;
+    data.producers[0].metadata = {
+      harvest_reference: harvestReference("2026-10-03"),
+    };
+    pallet.metadata = {
+      harvest_source: "reception_lot",
+      export_label: { harvest_date: null },
+    };
+    const before = structuredClone(data);
+    expect(palletLabelData(data, pallet).harvest).toBe("No informada");
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBeNull();
+    expect(palletLabelReview(data, pallet).pending).toContain("Fecha de cosecha");
+    expect(palletLabelReview(data, pallet).warnings).toContain(
+      "Confirme la cosecha de esta recepción; la referencia anterior del productor no se usa.",
+    );
+    expect(data).toEqual(before);
+
+    // A historical pallet without the new-delivery marker keeps its prior behavior.
+    const historical: Pallet = {
+      ...pallet,
+      metadata: { export_label: { harvest_date: null } },
+    };
+    expect(palletLabelData(data, historical).harvest).toBe("03/10/2026");
+    expect(palletLabelEditValues(data, historical).harvest_date).toBe("2026-10-03");
+  });
+
+  it("en nuevas recepciones imprime la cosecha real del lote y prioriza una fecha explícita de etiqueta", () => {
+    const { data, pallet } = fixture();
+    data.receptions[0].date = "2026-10-12";
+    data.field_lots[0].harvest_date = "2026-10-11";
+    data.producers[0].metadata = {
+      harvest_reference: harvestReference("2026-10-03"),
+    };
+    pallet.metadata = {
+      harvest_source: "reception_lot",
+      export_label: { harvest_date: null },
+    };
+    expect(palletLabelData(data, pallet).harvest).toBe("11/10/2026");
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-10-11");
+    expect(palletLabelReview(data, pallet).pending).not.toContain("Fecha de cosecha");
+
+    pallet.metadata.export_label!.harvest_date = "2026-10-10";
+    expect(palletLabelData(data, pallet).harvest).toBe("10/10/2026");
+    expect(palletLabelEditValues(data, pallet).harvest_date).toBe("2026-10-10");
+    expect(data.field_lots[0].harvest_date).toBe("2026-10-11");
+    expect(data.producers[0].metadata.harvest_reference?.date).toBe("2026-10-03");
+  });
+
   it("preserva la fecha del lote y la fecha específica de la etiqueta sobre la referencia del productor", () => {
     const { data, pallet } = fixture();
     data.producers[0].metadata = { harvest_reference: harvestReference() };

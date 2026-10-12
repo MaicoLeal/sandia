@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { emptyData } from "./domain";
-import type { Profile, TrapInstallation, Workspace } from "./types";
+import { base, emptyData } from "./domain";
+import type { Pallet, Profile, TrapInstallation, Workspace } from "./types";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -258,6 +258,41 @@ describe("carga de instalaciones de trampas y compatibilidad del servidor", () =
 });
 
 describe("separación de documentos readonly durante la sincronización", () => {
+  it("conserva el origen de cosecha de nuevas recepciones al cargar y serializar pallets", async () => {
+    const pallet: Pallet = {
+      ...base(organizationId, "En armado"),
+      code: "PAL-QA-NUEVA-RECEPCION",
+      token: "qr-qa-sin-cambios",
+      destination: "Uruguay",
+      assembled_at: "2026-10-12T15:00:00Z",
+      responsible: "Operador de prueba",
+      gross_kg: 442,
+      tare_kg: 42,
+      net_kg: 400,
+      fruit_count: null,
+      notes: "",
+      metadata: {
+        harvest_source: "reception_lot",
+        export_label: { harvest_date: null, producer_code: "SPE-QA-001-SAN" },
+      },
+    };
+    rows.pallets = [pallet];
+    const workspace = await service.loadRemote();
+    expect(workspace.data.pallets[0].metadata).toEqual(pallet.metadata);
+    mocks.rpc.mockClear();
+    await expect(service.syncRemote(workspace)).resolves.toBe(8);
+    const [, args] = mocks.rpc.mock.calls[0];
+    const serialized = JSON.parse(JSON.stringify(args));
+    expect(serialized.payload.pallets[0]).toMatchObject({
+      token: pallet.token,
+      net_kg: 400,
+      metadata: {
+        harvest_source: "reception_lot",
+        export_label: { harvest_date: null, producer_code: "SPE-QA-001-SAN" },
+      },
+    });
+  });
+
   it("envía solo Data y su revisión, sin instalaciones, documentos o coordenadas", async () => {
     const workspace: Workspace = {
       data: emptyData(),

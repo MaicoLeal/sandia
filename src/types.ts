@@ -113,7 +113,10 @@ export interface Classification extends Base {
   notes: string;
 }
 export interface Pallet extends Base {
-  metadata?: { export_label?: PalletExportLabel } | null;
+  metadata?: {
+    export_label?: PalletExportLabel;
+    harvest_source?: "reception_lot";
+  } | null;
   code: string;
   token: string;
   destination: string;

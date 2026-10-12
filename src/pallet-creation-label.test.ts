@@ -186,6 +186,81 @@ describe("datos confirmados para crear pallets", () => {
     expect(values().value.origin).toBe("Depto. de Canindeyú – Paraguay");
   });
 
+  it("separa una nueva entrega del mismo productor de la cosecha y carga anteriores", () => {
+    const { data, pallet } = fixture();
+    data.producers[0].metadata!.harvest_reference = {
+      date: "2026-10-03",
+      season: 2026,
+      status: "Confirmado",
+      source: "Planilla de la entrega anterior",
+      notes: [],
+    };
+    data.receptions[0].date = "2026-10-07";
+    data.field_lots[0].harvest_date = null;
+    pallet.metadata!.export_label = {
+      ...load,
+      harvest_date: "2026-10-03",
+    };
+    data.pallet_items.push({
+      ...base(pallet.organization_id),
+      pallet_id: pallet.id,
+      reception_id: data.receptions[0].id,
+      kg: pallet.net_kg,
+    });
+    const nextLot = {
+      ...data.field_lots[0],
+      ...base(pallet.organization_id),
+      code: "SAN-NUEVA-ENTREGA-20261012",
+      harvest_date: null,
+    };
+    data.field_lots.push(nextLot);
+    const nextReception = {
+      ...data.receptions[0],
+      ...base(pallet.organization_id, "Confirmado"),
+      lot_id: nextLot.id,
+      date: "2026-10-12",
+    };
+    data.receptions.push(nextReception);
+    const before = structuredClone(data);
+
+    expect(
+      palletCreationLabelValues(data, nextReception.id, "Uruguay", "2026-10-12"),
+    ).toEqual({
+      usesTodayLoad: false,
+      loadConflict: false,
+      value: {
+        producer_code: "CAN-QA-099-SAN",
+        origin: "Depto. de Canindeyú – Paraguay",
+        harvest_date: null,
+      },
+    });
+    expect(palletLabelData(data, pallet)).toMatchObject({
+      harvest: "03/10/2026",
+      packaged: "07/10/2026",
+      afidi: "1571652",
+      importerName: "IMPORTADOR QA",
+    });
+    expect(data).toEqual(before);
+  });
+
+  it("usa únicamente la cosecha del lote seleccionado aunque el productor tenga una referencia anterior confirmada", () => {
+    const { data, values } = fixture();
+    data.receptions[0].date = "2026-10-12";
+    data.producers[0].metadata!.harvest_reference = {
+      date: "2026-10-03",
+      season: 2026,
+      status: "Confirmado",
+      source: "Planilla anterior",
+      notes: [],
+    };
+    data.field_lots[0].harvest_date = "2026-10-11";
+    expect(values("2026-10-12").value.harvest_date).toBe("2026-10-11");
+    data.field_lots[0].harvest_date = null;
+    expect(values("2026-10-12").value.harvest_date).toBeNull();
+    data.field_lots[0].harvest_date = "2026-02-30";
+    expect(values("2026-10-12").value.harvest_date).toBeNull();
+  });
+
   it("no introduce fallback de carga en etiquetas existentes sin metadata y no cruza procedencias entre organizaciones", () => {
     const { data, values } = fixture();
     const blank = addPallet(data, {});

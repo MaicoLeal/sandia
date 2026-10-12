@@ -6,6 +6,7 @@ import {
   intakeSelection,
   kg,
   lossReasons,
+  dateLabel,
 } from "./domain";
 import { Empty, Field, NumericInput } from "./components";
 
@@ -18,14 +19,20 @@ export function LossFields({
   receptionId: string | null;
   producerId: string | null;
 }) {
-  const eligible = data.receptions.filter(
-    (r) =>
-      r.status !== "Cancelado" &&
-      (!producerId || origin(data, r.id).producer?.id === producerId) &&
-      !data.classifications.some(
-        (c) => c.reception_id === r.id && c.status !== "Cancelado",
-      ),
-  );
+  const eligible = data.receptions
+    .filter(
+      (r) =>
+        r.status !== "Cancelado" &&
+        (!producerId || origin(data, r.id).producer?.id === producerId) &&
+        !data.classifications.some(
+          (c) => c.reception_id === r.id && c.status !== "Cancelado",
+        ),
+    )
+    .sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) ||
+        b.created_at.localeCompare(a.created_at),
+    );
   const [id, setId] = useState(
     receptionId && eligible.some((r) => r.id === receptionId)
       ? receptionId
@@ -68,7 +75,7 @@ export function LossFields({
           <option value="">Seleccione la entrega</option>
           {eligible.map((r) => (
             <option value={r.id} key={r.id}>
-              {origin(data, r.id).producer?.name} ·{" "}
+              {origin(data, r.id).producer?.name} · {dateLabel(r.date)} ·{" "}
               {origin(data, r.id).lot?.code} · {kg(receptionTotal(data, r.id))}{" "}
               kg
             </option>

@@ -74,6 +74,7 @@ const harvestDatesForSources = (
   sources: ReturnType<typeof origin>[],
 ) => {
   const allowProducerReference =
+    pallet.metadata?.harvest_source !== "reception_lot" &&
     !["Expedido", "Cancelado"].includes(pallet.status) &&
     !data.shipment_pallets.some((link) => link.pallet_id === pallet.id);
   return sources.map((source) =>
@@ -97,7 +98,9 @@ export function receptionPalletLabelValues(
   return {
     producer_code: producerReferenceCodes([source]),
     origin: source.producer?.metadata?.export_origin?.trim() || "",
-    harvest_date: sourceHarvestDate(source, true),
+    // A new delivery needs its own harvest date; a producer reference may belong
+    // to an earlier delivery. Historical label fallbacks remain below.
+    harvest_date: sourceHarvestDate(source, false),
   };
 }
 export function palletLabelEditValues(
@@ -288,7 +291,9 @@ export function palletLabelReview(
     )
   )
     warnings.add(
-      "Hay una referencia de cosecha pendiente o incompatible con la recepción; no se usa en la etiqueta.",
+      pallet.metadata?.harvest_source === "reception_lot"
+        ? "Confirme la cosecha de esta recepción; la referencia anterior del productor no se usa."
+        : "Hay una referencia de cosecha pendiente o incompatible con la recepción; no se usa en la etiqueta.",
     );
   return { pending: [...pending], warnings: [...warnings] };
 }
