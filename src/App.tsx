@@ -138,7 +138,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.12-14 · Nuevas entregas por productor";
+const appVersion = "2026.10.12-15 · AFIDI de la nueva carga";
 
 function AppUpdateControls({
   blockedReason = "",
@@ -4238,7 +4238,13 @@ function PalletCreationLabelFields({
   return (
     <section className="panel inset" aria-label="Datos de la etiqueta">
       <h3>Datos de la etiqueta</h3>
-      {preset.usesTodayLoad ? (
+      {preset.authorizedLoadDate ? (
+        <p className="hint" role="status">
+          Carga del {dateLabel(preset.authorizedLoadDate)} para Uruguay: AFIDI{" "}
+          {preset.value.afidi} e importador RINALIR completados. Puede editarlos
+          aquí. Complete la fecha real de envasado.
+        </p>
+      ) : preset.usesTodayLoad ? (
         <p className="hint" role="status">
           Datos de la carga de hoy. AFIDI, importador y envasado ya están
           completados; verifíquelos antes de crear. Puede editarlos aquí.

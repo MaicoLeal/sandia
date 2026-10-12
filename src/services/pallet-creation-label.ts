@@ -1,11 +1,16 @@
 import type { Data, PalletExportLabel } from "../types";
 import { day } from "../domain";
 import { receptionPalletLabelValues } from "./pallet-label-data";
+import { authorizedExportLoad } from "./authorized-export-load";
 
 type LoadFields = Required<
   Pick<
     PalletExportLabel,
-    "afidi" | "importer_name" | "importer_address" | "senave_program" | "packaged_date"
+    | "afidi"
+    | "importer_name"
+    | "importer_address"
+    | "senave_program"
+    | "packaged_date"
   >
 >;
 const loadKeys = [
@@ -20,16 +25,20 @@ const isUruguay = (destination: string) =>
 const calendarDate = (value: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T12:00:00Z`);
-  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(parsed.valueOf()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
 };
 
 export interface PalletCreationLabelValues {
   value: PalletExportLabel;
   usesTodayLoad: boolean;
   loadConflict: boolean;
+  authorizedLoadDate?: string;
 }
 
-/** Reuse only one confirmed, open Uruguay load assembled and packaged today. */
+/** Apply explicit instructions first, otherwise reuse one unambiguous load today. */
 export function palletCreationLabelValues(
   data: Data,
   receptionId: string,
@@ -46,6 +55,18 @@ export function palletCreationLabelValues(
     !calendarDate(today)
   )
     return empty;
+
+  const authorized = authorizedExportLoad(
+    reception.organization_id,
+    destination,
+    today,
+  );
+  if (authorized)
+    return {
+      ...empty,
+      value: { ...value, ...authorized },
+      authorizedLoadDate: today,
+    };
 
   const candidates = data.pallets.filter((pallet) => {
     const assembled = new Date(pallet.assembled_at);
@@ -79,7 +100,9 @@ export function palletCreationLabelValues(
       fields.importer_address.length <= 400 &&
       fields.senave_program,
   );
-  const tuples = new Map(complete.map((fields) => [JSON.stringify(fields), fields]));
+  const tuples = new Map(
+    complete.map((fields) => [JSON.stringify(fields), fields]),
+  );
   if (!tuples.size) return empty;
   if (tuples.size !== 1) return { ...empty, loadConflict: true };
   const load = [...tuples.values()][0];
@@ -87,9 +110,15 @@ export function palletCreationLabelValues(
   const conflicting = normalized.some((fields) =>
     loadKeys.some((key) => {
       const known = fields[key];
-      return typeof known === "string" && known.length > 0 && known !== load[key];
+      return (
+        typeof known === "string" && known.length > 0 && known !== load[key]
+      );
     }),
   );
   if (conflicting) return { ...empty, loadConflict: true };
-  return { value: { ...value, ...load }, usesTodayLoad: true, loadConflict: false };
+  return {
+    value: { ...value, ...load },
+    usesTodayLoad: true,
+    loadConflict: false,
+  };
 }
