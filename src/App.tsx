@@ -138,7 +138,7 @@ import {
   subscribeAppUpdate,
 } from "./services/app-update";
 
-const appVersion = "2026.10.12-15 · AFIDI de la nueva carga";
+const appVersion = "2026.10.12-16 · Etiqueta en una hoja A4";
 
 function AppUpdateControls({
   blockedReason = "",

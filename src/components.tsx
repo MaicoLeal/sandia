@@ -241,7 +241,7 @@ export function Label({
     <>
       <div className="row between no-print label-format-note">
         <p className="hint">
-          A4 horizontal · 297 × 210 mm · Una etiqueta por hoja
+          A4 horizontal · Una etiqueta por hoja · Escala 100 %
         </p>
         {onEditExport && (
           <button
@@ -356,6 +356,11 @@ export function Label({
           </strong>
         </footer>
       </div>
+      <p className="hint no-print">
+        Al imprimir, elija papel A4, orientación horizontal y desactive los
+        encabezados y pies de página del navegador. También puede descargar el
+        PDF A4 listo para imprimir.
+      </p>
       <p className="hint no-print">
         El QR abre la identificación, peso, destino y estado del pallet. Para
         consultar productor, lote y origen completo, inicie sesión con una

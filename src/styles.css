@@ -1702,7 +1702,7 @@ th {
   }
   @page {
     size: A4 landscape;
-    margin: 8mm;
+    margin: 10mm;
   }
 }
 
@@ -1987,9 +1987,19 @@ th {
 }
 @media print {
   html,
-  body {
+  body,
+  #root,
+  .app-shell {
     margin: 0;
     padding: 0;
+    min-height: 0;
+    height: auto;
+  }
+  .modal {
+    inset: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
   .modal:has(.export-label) {
     width: 100%;
@@ -1998,23 +2008,28 @@ th {
     margin: 0;
   }
   .export-label.print-label {
-    width: 281mm;
-    height: 194mm;
+    width: 275mm;
+    height: 186mm;
     max-width: none;
-    margin: 0;
-    padding: 4mm;
+    margin: 0 auto;
+    padding: 3mm;
     border-width: 1.2mm;
     border-radius: 3mm;
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.1;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
   .export-label-head {
-    height: 61.5mm;
+    height: 60mm;
     padding: 0 0 3mm;
     gap: 2mm;
   }
   .export-label-brand-row {
     height: 47mm;
+    flex-shrink: 0;
   }
   .export-label-head:has(.export-label-importer) .export-label-brand-row {
     grid-template-columns: 85mm minmax(0, 1fr);
@@ -2036,7 +2051,7 @@ th {
     line-height: 1.1;
   }
   .export-label-importer p {
-    font-size: 11pt;
+    font-size: 10.5pt;
     line-height: 1.05;
   }
   .print-label .export-label-logo {
@@ -2051,12 +2066,12 @@ th {
     gap: 1mm 4mm;
   }
   .export-label-main {
-    height: 91mm;
+    height: 84mm;
     grid-template-columns: minmax(0, 1fr) 51mm;
     gap: 4mm;
   }
   .export-label-fields tr {
-    height: 13mm;
+    height: 12mm;
   }
   .export-label-fields th,
   .export-label-fields td {
@@ -2103,8 +2118,8 @@ th {
     margin-top: 0;
   }
   .export-label-declaration {
-    margin-top: 4mm;
-    height: 26.5mm;
+    margin-top: 3mm;
+    height: 27mm;
     padding: 2mm;
     border-width: 0.5mm;
   }

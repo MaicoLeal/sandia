@@ -74,7 +74,22 @@ export function createPalletLabelPdf(
   });
   pdf.setDrawColor(0, 111, 50);
   pdf.setLineWidth(1.2);
-  pdf.roundedRect(8, 8, 281, 194, 3, 3);
+  pdf.roundedRect(11, 12, 275, 186, 3, 3);
+  // Leave printer-safe margins while keeping the validated label proportions.
+  // PDF transformation matrices use points, even when jsPDF draws in millimeters.
+  const contentScale = 0.96;
+  const pointsPerMillimeter = 72 / 25.4;
+  pdf.saveGraphicsState();
+  pdf.setCurrentTransformationMatrix(
+    pdf.Matrix(
+      contentScale,
+      0,
+      0,
+      contentScale,
+      (297 * (1 - contentScale) * pointsPerMillimeter) / 2,
+      (210 * (1 - contentScale) * pointsPerMillimeter) / 2,
+    ),
+  );
   const importer = labelImporterPrintLayout(label);
   const hasImporter = importer.rows.length > 0;
   const logoWidth = hasImporter ? 85 : 140;
@@ -215,6 +230,7 @@ export function createPalletLabelPdf(
       "Los códigos de lote no caben en la etiqueta. Revise los datos.",
     );
   pdf.text(lotLine, 148.5, lastY, { align: "center" });
+  pdf.restoreGraphicsState();
   return pdf;
 }
 
